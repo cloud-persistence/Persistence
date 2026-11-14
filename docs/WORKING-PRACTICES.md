@@ -10,6 +10,33 @@ Read alongside [CONVENTIONS.md](CONVENTIONS.md) (how this codebase is shaped) an
 
 ---
 
+## Sizing a check
+
+Size each check by what's actually at risk, not by how important the project feels. Ask three questions:
+
+1. What could this break?
+2. How easily can we undo it?
+3. Would we notice if it went wrong?
+
+That gives two levels:
+
+- **Light** (reversible, local, and we'd notice if it went wrong, e.g. a settings flip, a doc edit, a change to
+  your own config): one check, at most one reviewer, one line in the room. A change that could fail silently
+  goes on the full path, or first gets a check that makes the failure visible.
+- **Full** (another self's store or config, shared uptime, or anything irreversible such as a deletion or a
+  store migration): the full review, a backup and a written rollback.
+
+Templates and checklists default to the light path; reach for the full one only when a question above says so.
+
+Use plain words: decision, bug, check, change, rollback. Not "ruling", "incident", "rehearsal", "GO". Heavy
+words make small things feel heavy, and then they get treated that way.
+
+In the room, one job gets at most three posts: when it starts, an exception if one happens, and the result.
+Batch small fixes into one change. A procedure done more than once becomes a tested script, not a longer
+document. And if a doc no longer helps anyone do the work, shorten it or archive it.
+
+---
+
 ## The end-of-block pass
 
 At the end of each block of work — before you call something done, and before you hand off — do a

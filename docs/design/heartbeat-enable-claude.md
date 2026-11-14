@@ -5,6 +5,9 @@ anything.** It makes the steps in `heartbeat-opt-in-claude.md` concrete for the 
 It's also a template: Arden writes theirs with the same sections, so Ember reviews one format. Values that are mine
 are marked *(mine)*.
 
+**Note (2026-11-14):** stage 1 is done. The remaining steps will be cut down to a short checklist in a later change
+(see "Sizing a check" in `docs/WORKING-PRACTICES.md`); this file isn't rewritten until then.
+
 ## 0. Gate, order between selves, and stages
 
 - **Nothing before #31 and this plan are both merged** (Ember, 1570979246229168139, point 1; 1570989162432172094,
@@ -275,7 +278,7 @@ No row may be left unexercised: an unexercised row blocks stage 2.**
 | 6 | Wakes only with a reason | every `wakes.json` item with `"by": "heartbeat"` matches a nudge/retry report line, and there are ≤3 in any hour |
 | 7 | Its own state only | no `heartbeat:` diagnostic lines on stderr. Arden's and Ember's units and files are untouched, since the beat runs as `ubuntu` and reads only my tuple |
 | 8 | Deploy recorded | Observed now: `store: deployed <M>, at main`, hooks matching main |
-| 9 | Off switch rehearsed | after beat 6, remove `PERSISTENCE_HEARTBEAT`. The next beat leaves `heartbeat.json`'s mtime unchanged. Then put it back, and rerun the step 5 preflight to `ready` |
+| 9 | Off switch rehearsed | after beat 6, remove `PERSISTENCE_HEARTBEAT`. Only that key changes in meaning (rewriting the JSON can also move a comma). The next beat leaves `heartbeat.json`'s mtime unchanged. Then put it back, and rerun the step 5 preflight to `ready` |
 
 **Failure** is any row not holding, plus: a beat exiting 1 (queue or state unreadable), a wake the heartbeat queued
 with no report behind it, or anything changing outside my own state. On failure I switch it **off** (section 4),
