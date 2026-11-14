@@ -347,6 +347,42 @@ consent. **Way back:** turn the setting off; claim files are plain JSON, no stor
 - **One setting:** `ptask`, the Stop hook and the heartbeat, given one settings.json, agree on on/off; a value in
   `os.environ` but not in settings.json doesn't turn anything on.
 
+## Subject: one live claim per job (the deploy guard, 2026-11-14)
+
+Added after the duplicate deploy claims of 2026-11-14 (incident #18518). The room made a second claim for the stage 1
+deploy while the first was still live, so two sessions were each cleared to deploy. Only ea465313 did, once. A claim may carry a `subject`, a slug
+(`[a-z0-9][a-z0-9-]{0,39}`), set by `ptask claim --subject <s>` or, from the room, `pwake <min> --subject <s>`.
+
+- **One live claim per subject.** Creating a claim whose subject already has a claim that isn't done or abandoned is
+  refused under `tasks/.lock`, and writes nothing (no claim, no queue item). Paused counts as live, because a pause
+  expires back to claimed. To free a subject, close the old claim: anyone may `ptask abandon` an open one; a claimed
+  one is closed by its owner, or taken (`ptask take`, owner stopped) and then abandoned.
+- **`ptask holds <id> <subject>`** exits 0 only if this session owns claim `<id>`, it is claimed, and its subject is
+  exactly `<subject>`. It only reads.
+- **The deploy** (`deploy-remote.sh --claim <id> <host> [user ...]`) runs `holds <id> deploy` before it publishes
+  anything. On the host it holds an exclusive `flock` on `/opt/persistence/.deploy.lock` for the install and the
+  restarts, writes the claim and session to `/opt/persistence/.deploy.holder`, and refuses (doesn't wait) if the lock is
+  held. Each run copies its files to its own new staging directory. The lock stops two runs overlapping.
+- **One deploy authorization per host**, across selves, because claims are per state directory and two selves could
+  each hold a live `deploy` claim (Ember 1571158094472290428). `/opt/persistence/.deploy.claim` names the claim it's
+  bound to. A deploy binds it if it's free, keeps it if it names the caller's claim, and rebinds it if it names a claim
+  of the caller's own self that is closed (`ptask closed <id>`). Anything else is refused (exit 5), naming the bound
+  claim. The holder frees it with `deploy-remote.sh --release --claim <id> <host>`, while holding that claim or after
+  closing it. The script reads the authorization first and compares it again under the lock, so a change in between
+  is refused.
+- **Fails closed** (Arden's review of #37). If any claim file can't be read, a claim with a subject is refused,
+  because a live claim for that subject can't be ruled out. Once the host's lock is held, the host says `LOCKED` and
+  waits, and the script runs `holds` again in the caller's own claims, right before anything is installed. A claim
+  closed or taken during the build therefore refuses (exit 3), and nothing is installed or bound. Each run's staging
+  directory must be new. Together with the claim check, this stops a second claim deploying after the first has finished
+  (Arden 1571042268406882415).
+- **Older records** have no `subject` key. They read as `subject: null` and gain the key at their next write. No
+  other key may be missing.
+- **Bootstrap:** until the hooks with this change are deployed, the installed `ptask` doesn't know `--subject`. The
+  first guarded deploy claims with the checkout's copy: `python3 scripts/claude-code/claims.py claim --subject deploy
+  "<task>"`, and closes it the same way. The old code requires the exact old key set, so it skips a record that has
+  `subject`: the installed `ptask` can't see or close that claim until the deploy installs this change.
+
 ## Second step (after claims run)
 
 The room session is shown stale open claims (Ember's E24): ids, owner, status, age since `updated`; `ptask show` for

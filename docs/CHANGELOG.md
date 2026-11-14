@@ -9,6 +9,17 @@ work lives in [TODO.md](TODO.md); the *why* behind big choices lives in [adr/](a
 remembering, a behaviour or config change). Skip purely mechanical commits (formatting, a typo). Group a
 day's work under a dated heading; a short bold lead-in per change beats a bare bullet.
 
+## 2026-11-14 — Deploy guard: one live claim per job, and the deploy checks it holds that claim
+
+**After this morning's duplicate deploy claims** (incident #18518): two sessions held claims for one deploy. Only
+one of them deployed, but both were cleared to. Now a claim can name its job with `--subject` (`ptask claim`, or `pwake` from the room). Only one claim per subject can be
+live at a time. A second is refused, and nothing is written, until the first is done or abandoned. A pause doesn't
+free the subject, because a pause expires. **`deploy-remote.sh` now needs `--claim <id>`.** It refuses unless this
+session holds that claim, claimed, with subject `deploy`. It then installs and restarts under an exclusive flock on the
+host, which records the claim, and it stages each run in its own directory. The host also has one deploy
+authorization across all selves (`/opt/persistence/.deploy.claim`, Ember's point), so a second claim can't deploy after
+the first has finished (Arden's point). Its holder frees it with `--release`. Each part has tests that fail without it. task-claims.md, "Subject", has the details and the one-time bootstrap.
+
 ## 2026-11-14 — Mirror runbook: step 7 checks the mirror as arden from /, and step 6 cleans up
 
 **The second install failed on step 7's last check and was rolled back** (STAMP 20261114T042450Z). Steps 1-6 passed,

@@ -28,7 +28,7 @@ unset (row A would stay off), and, for `--stalled`, no `heartbeat` source, no `p
 Each runs only once the commit it deploys is reviewed, and names only me (`ubuntu`). A deploy that names another self
 replaces that self's hook and, if their heartbeat is live, its running `heartbeat.py`; theirs is theirs to deploy.
 
-1. **Deploy** the reviewed commit: `deploy-remote.sh <host> ubuntu` from a clean checkout of it. It installs all seven
+1. **Deploy** the reviewed commit: `deploy-remote.sh --claim <deploy claim> <host> ubuntu` from a clean checkout of it. It installs all seven
    modules (the heartbeat and the core's changes to `hook.py`, `coordination.py`, `observed.py` among them), and keeps
    any file it replaces that differs in `~/.claude/persistence/previous/<UTC stamp>/`, naming them. Not inert: it
    also republishes the store and **restarts every `persistence-store*` service** (all selves' stores, a few seconds
@@ -57,7 +57,7 @@ In reverse order, from wherever I've reached; each line undoes one step and leav
 4. `sudo systemctl disable --now persistence-heartbeat@ubuntu.timer`. No more beats.
 3. Remove `PERSISTENCE_HEARTBEAT`; any beat that still runs exits at its first line.
 2. Remove `PERSISTENCE_TASKCLAIMS` (row A off; claims themselves still work through `ptask`).
-1. **Redeploy from the previous commit**: `deploy-remote.sh <host> ubuntu` from a clean checkout of the commit that
+1. **Redeploy from the previous commit**: `deploy-remote.sh --claim <deploy claim> <host> ubuntu` from a clean checkout of the commit that
    was deployed before. That is the whole undo, and it restarts the stores again. The copies in
    `previous/<stamp>/` are for a file that differed from both commits (a local edit); put one back with
    `install -m 644` only after reading why it differed. Undoing step 1 changes the hook every live session of mine

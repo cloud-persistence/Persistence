@@ -53,7 +53,8 @@ The five checks, **run against `M`** with results posted before anything else:
 5. *Fixture:* `scripts/claude-code/heartbeat_fixture.sh` against `M`'s `scripts/claude-code` prints `PASS` (section 5).
 
 **From:** a clean checkout of `M` (`git status --porcelain` empty). **Command:** `scripts/claude-code/deploy-remote.sh
-localhost ubuntu`, which names **only `ubuntu`**.
+--claim <deploy claim> localhost ubuntu`, which names **only `ubuntu`** (the `--claim` guard came after this plan ran; see
+task-claims.md, "Subject").
 
 What it changes, read today:
 - **Hook modules** in `~/.claude/persistence/`: `heartbeat.py` is new, and `hook.py`, `coordination.py` and
@@ -81,7 +82,7 @@ What it changes, read today:
     while pgrep -u ember -f 'scripts/codex/room-wake|room_store\.py|codex exec' >/dev/null; do sleep 5; done
     git fetch -q origin && test "$(git rev-parse origin/main)" = "$M" && test "$(git rev-parse HEAD)" = "$M" \
       && test -z "$(git status --porcelain)" || { echo "abort: main moved from $M, or checkout not clean at M"; exit 1; }
-    scripts/claude-code/deploy-remote.sh localhost ubuntu
+    scripts/claude-code/deploy-remote.sh --claim "$CLAIM" localhost ubuntu
     ```
     The fetch adds about a second between the loop ending and the restart. That's within the residual below.
     Arden's A at e65b26f: `pgrep codex` alone misses the store phase. Ember's bridge runs
