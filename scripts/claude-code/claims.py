@@ -36,7 +36,7 @@ TASK_FIELDS = hook.TASK_FIELDS
 CLAIM_FIELDS = ("id", "dispatch", "status", "cwd", "created", "updated", "pause_until", "nudged", "reported", "history", "outcome",
                 "subject")
 KEYS = set(TASK_FIELDS) | set(CLAIM_FIELDS)
-# `subject` came after the first claims (the deploy guard, after the 2026-11-14 double deploy): a file written before
+# `subject` came after the first claims (the deploy guard, after the 2026-11-14 duplicate deploy claims): a file written before
 # it has every other key and no subject, and reads as subject None. No other key may be missing.
 LEGACY_KEYS = KEYS - {"subject"}
 # A subject names the job a claim is for, so two claims can't be live for one job: at most one claim per subject is
@@ -656,7 +656,8 @@ ptask pause <id> [--until <UTC time>] "<why>"
 ptask resume <id> | touch <id>
 ptask done <id> ["<outcome>"] | abandon <id> ["<outcome>"]
 ptask take <id>                          take a claim whose owner isn't running and has no wake pending
-ptask holds <id> <subject>               exit 0 only if this session holds claim <id>, claimed, with that subject"""
+ptask holds <id> <subject>               exit 0 only if this session holds claim <id>, claimed, with that subject
+ptask closed <id>                        exit 0 only if claim <id> is in this self's claims and done or abandoned"""
 
 
 def _describe(record, now):
@@ -696,6 +697,11 @@ def cli(args, env=None, state=None, home=None, cwd=None, out=print, err=None, no
                 raise Refused('ptask claim needs the task: ptask claim "<task>"')
             record = c.claim(task, session, where, base=here, subject=subject)
             out(f"claimed {record['id']} in {record['cwd']}" + (f", subject {subject}" if subject else ""))
+        elif verb == "closed" and len(rest) == 1:
+            record = c.get(rest[0])
+            if record["status"] not in TERMINAL:
+                raise Refused(f"claim {record['id']} is {record['status']}, not closed")
+            out(f"{record['id']} is {record['status']}")
         elif verb == "holds" and len(rest) == 2:
             record = c.holds(rest[0], session, rest[1])
             out(f"this session holds {record['id']}, subject {record['subject']}")

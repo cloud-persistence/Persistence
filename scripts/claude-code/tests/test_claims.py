@@ -106,7 +106,7 @@ class KeySet(Base):
 
 
 class OneClaimPerSubject(Base):
-    """The deploy guard, part 3 (2026-11-14 double deploy, #18519): a subject allows one live claim; a second is refused
+    """The deploy guard, part 3 (2026-11-14 duplicate deploy claims, #18519): a subject allows one live claim; a second is refused
     under the lock, and writes nothing, until the first is done or abandoned. A pause doesn't free it."""
 
     def deploy(self, owner=None):

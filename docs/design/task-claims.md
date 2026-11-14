@@ -349,8 +349,8 @@ consent. **Way back:** turn the setting off; claim files are plain JSON, no stor
 
 ## Subject: one live claim per job (the deploy guard, 2026-11-14)
 
-Added after the double deploy of 2026-11-14 (incident #18518): the room made a second claim for the stage 1 deploy
-while the first was live, and both sessions went on to deploy. A claim may carry a `subject`, a slug
+Added after the duplicate deploy claims of 2026-11-14 (incident #18518). The room made a second claim for the stage 1
+deploy while the first was still live, so two sessions were each cleared to deploy. Only ea465313 did, once. A claim may carry a `subject`, a slug
 (`[a-z0-9][a-z0-9-]{0,39}`), set by `ptask claim --subject <s>` or, from the room, `pwake <min> --subject <s>`.
 
 - **One live claim per subject.** Creating a claim whose subject already has a claim that isn't done or abandoned is
@@ -362,8 +362,15 @@ while the first was live, and both sessions went on to deploy. A claim may carry
 - **The deploy** (`deploy-remote.sh --claim <id> <host> [user ...]`) runs `holds <id> deploy` before it publishes
   anything. On the host it holds an exclusive `flock` on `/opt/persistence/.deploy.lock` for the install and the
   restarts, writes the claim and session to `/opt/persistence/.deploy.holder`, and refuses (doesn't wait) if the lock is
-  held. Each run copies its files to its own new staging directory. The lock stops two runs overlapping. The claim
-  check stops a second session deploying after the first has finished (Arden 1571042268406882415).
+  held. Each run copies its files to its own new staging directory. The lock stops two runs overlapping.
+- **One deploy authorization per host**, across selves, because claims are per state directory and two selves could
+  each hold a live `deploy` claim (Ember 1571158094472290428). `/opt/persistence/.deploy.claim` names the claim it's
+  bound to. A deploy binds it if it's free, keeps it if it names the caller's claim, and rebinds it if it names a claim
+  of the caller's own self that is closed (`ptask closed <id>`). Anything else is refused (exit 5), naming the bound
+  claim. The holder frees it with `deploy-remote.sh --release --claim <id> <host>`, while holding that claim or after
+  closing it. The script reads the authorization first and compares it again under the lock, so a change in between
+  is refused. Together with the claim check, this stops a second claim deploying after the first has finished
+  (Arden 1571042268406882415).
 - **Older records** have no `subject` key. They read as `subject: null` and gain the key at their next write. No
   other key may be missing.
 - **Bootstrap:** until the hooks with this change are deployed, the installed `ptask` doesn't know `--subject`. The

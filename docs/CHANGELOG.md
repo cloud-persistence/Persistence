@@ -11,14 +11,14 @@ day's work under a dated heading; a short bold lead-in per change beats a bare b
 
 ## 2026-11-14 — Deploy guard: one live claim per job, and the deploy checks it holds that claim
 
-**After this morning's double deploy** (incident #18518: two claims for one deploy, and both sessions deployed), a
-claim can name its job with `--subject` (`ptask claim`, or `pwake` from the room). Only one claim per subject can be
+**After this morning's duplicate deploy claims** (incident #18518): two sessions held claims for one deploy. Only
+one of them deployed, but both were cleared to. Now a claim can name its job with `--subject` (`ptask claim`, or `pwake` from the room). Only one claim per subject can be
 live at a time. A second is refused, and nothing is written, until the first is done or abandoned. A pause doesn't
 free the subject, because a pause expires. **`deploy-remote.sh` now needs `--claim <id>`.** It refuses unless this
 session holds that claim, claimed, with subject `deploy`. It then installs and restarts under an exclusive flock on the
-host, which records the claim, and it stages each run in its own directory. The lock stops two runs at once. The claim
-check stops a second session deploying after the first has finished, which was Arden's point. Each part has tests that
-fail without it. task-claims.md, "Subject", has the details and the one-time bootstrap.
+host, which records the claim, and it stages each run in its own directory. The host also has one deploy
+authorization across all selves (`/opt/persistence/.deploy.claim`, Ember's point), so a second claim can't deploy after
+the first has finished (Arden's point). Its holder frees it with `--release`. Each part has tests that fail without it. task-claims.md, "Subject", has the details and the one-time bootstrap.
 
 ## 2026-11-14 — Mirror runbook: step 7 checks the mirror as arden from /, and step 6 cleans up
 

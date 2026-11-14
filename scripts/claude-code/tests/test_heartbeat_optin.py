@@ -486,7 +486,7 @@ class DeployRemote(FakeHost, unittest.TestCase):
 
 
 class DeployGuard(FakeHost, unittest.TestCase):
-    """The deploy guard, parts 1 and 2 (2026-11-14 double deploy, #18519): no run without the caller holding the live
+    """The deploy guard, parts 1 and 2 (2026-11-14 duplicate deploy claims, #18519): no run without the caller holding the live
     deploy claim, and no run while another holds the host's lock. A refused run changes nothing on the host."""
 
     def setUp(self):
@@ -531,6 +531,89 @@ class DeployGuard(FakeHost, unittest.TestCase):
         self.untouched()
         self.assertEqual(list(self.tmp.iterdir()), [], "the refused run's staging directory is removed")
         self.deploy()  # released: the same claim deploys
+
+
+class HostWideDeploy(FakeHost, unittest.TestCase):
+    """Ember 1571158094472290428: claims are per state directory, so two selves can each hold a live deploy claim. The
+    host's one deploy authorization (/opt/persistence/.deploy.claim) lets only one of them through, even after the
+    first has finished, until the first's self releases it or (for its own next claim) has closed it."""
+
+    def setUp(self):
+        import uuid
+        self.fake_host()
+        sys.path.insert(0, str(REPO))
+        import claims
+        self.other_state = self.w / "state-other"
+        self.other_me = str(uuid.uuid4())
+        self.other_claims = claims.Claims(self.other_state, home=self.w)
+        self.other_claim = self.other_claims.claim("Deploy too", self.other_me, str(self.w / "work"), subject="deploy")["id"]
+        self.other_env = dict(self.env, PERSISTENCE_STATE_DIR=str(self.other_state), CLAUDE_CODE_SESSION_ID=self.other_me)
+
+    def other(self, *args, check=False):
+        return self.deploy(*(args or ("--claim", self.other_claim, "fakehost", self.user)), check=check, env=self.other_env)
+
+    def bound(self):
+        path = self.opt / ".deploy.claim"
+        return path.read_text().split()[0] if path.exists() else None
+
+    def test_both_selves_hold_a_deploy_claim_but_only_one_passes(self):
+        self.assertEqual(self.claims.get(self.claim)["status"], "claimed")
+        self.assertEqual(self.other_claims.get(self.other_claim)["status"], "claimed")
+        self.deploy()
+        self.assertEqual(self.bound(), self.claim)
+        run = self.other()
+        self.assertEqual(run.returncode, 5, run.stderr)
+        self.assertIn(self.claim, run.stderr)
+        self.assertIn("--release", run.stderr)
+
+    def test_the_first_closing_its_claim_doesnt_free_the_host_for_another_self(self):
+        self.deploy()
+        self.claims.done(self.claim, self.me)
+        self.assertEqual(self.other().returncode, 5)  # the other self can't see that claim, so it can't tell
+
+    def test_release_by_the_holder_frees_it(self):
+        self.deploy()
+        self.assertEqual(self.other("--release", "--claim", self.claim, "fakehost").returncode, 3)  # not theirs
+        self.assertEqual(self.deploy("--release", "--claim", self.claim, "fakehost").returncode, 0)
+        self.assertIsNone(self.bound())
+        self.assertEqual(self.other().returncode, 0)
+        self.assertEqual(self.bound(), self.other_claim)
+
+    def test_release_after_closing_still_works(self):
+        self.deploy()
+        self.claims.done(self.claim, self.me)
+        self.assertEqual(self.deploy("--release", "--claim", self.claim, "fakehost").returncode, 0)
+        self.assertIsNone(self.bound())
+
+    def test_a_self_rebinds_from_its_own_closed_claim(self):
+        self.deploy()
+        self.claims.done(self.claim, self.me)
+        nxt = self.claims.claim("Next deploy", self.me, str(self.w / "work"), subject="deploy")["id"]
+        self.deploy("--claim", nxt, "fakehost", self.user)
+        self.assertEqual(self.bound(), nxt)
+
+    def test_a_live_claim_of_the_same_self_blocks_another_session(self):
+        # The incident's shape within one self, if the subject rule were bypassed: a second claim, the first live.
+        import uuid
+        second_me = str(uuid.uuid4())
+        self.deploy()
+        record = self.claims.create("Deploy (dup)", second_me, str(self.w / "work"), by=second_me)
+        run = self.deploy("--claim", record["id"], "fakehost", self.user, check=False,
+                          env=dict(self.env, CLAUDE_CODE_SESSION_ID=second_me))
+        self.assertEqual(run.returncode, 3)  # no subject: refused before the host is even asked
+
+    def test_a_change_between_check_and_lock_refuses(self):
+        # The authorization is read, then compared again under the lock: a bind in between makes the run refuse.
+        fake_ssh = self.w / "bin" / "ssh"
+        real = fake_ssh.read_text()
+        fake_ssh.write_text(real.replace("exec bash", f'case "$c" in *"set -e"*) echo "x y" > {self.opt}/.deploy.claim;; esac; exec bash'))
+        run = self.deploy(check=False)
+        self.assertEqual(run.returncode, 5, run.stderr)
+        self.assertIn("changed while this run checked it", run.stderr)
+        self.untouched_store()
+
+    def untouched_store(self):
+        self.assertFalse((self.opt / "store" / "persistence-store").exists())
 
 if __name__ == "__main__":
     unittest.main()
