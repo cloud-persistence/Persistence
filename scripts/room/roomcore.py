@@ -240,14 +240,19 @@ def with_attachments(text, names=(), voice=False, saved=None, transcript=None):
     """A message's text with what it carried beyond text, so a voice note or a file is never a blank line.
 
     `saved` maps an attachment's name to (kind, local path) for those the bridge downloaded, kind "image" or "file";
-    `transcript` is a voice message's text when it was transcribed."""
+    `transcript` is a voice message's text when it was transcribed: None when transcription failed or never ran, empty
+    when it ran and heard no speech (a clip sent by accident), which is not a failure and must not read as one."""
     saved = saved or {}
     extra = []
     if voice:
         path = next((p for _, p in saved.values()), None)
         audio = f" (audio: {path})" if path else ""
-        extra.append(f"[voice message, transcribed]: {transcript.strip()}{audio}" if transcript and transcript.strip()
-                     else f"[voice message, no transcript]{audio}")
+        if transcript is None:
+            extra.append(f"[voice message, no transcript]{audio}")
+        elif transcript.strip():
+            extra.append(f"[voice message, transcribed]: {transcript.strip()}{audio}")
+        else:
+            extra.append(f"[voice message, no speech heard]{audio}")
     else:
         for n in names:
             kind, path = saved.get(n, (None, None))

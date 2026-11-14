@@ -931,6 +931,13 @@ class AttachmentText(unittest.TestCase):
         self.assertEqual(rc.with_attachments("", ["v.ogg"], voice=True, saved={"v.ogg": ("file", "/s/v.ogg")}),
                          "[voice message, no transcript] (audio: /s/v.ogg)")
 
+    def test_voice_heard_as_silence_is_not_called_a_failure(self):
+        # John's 1571191256019902622 (2026-11-14): 2.7 s with no speech; Parakeet and Whisper both gave "". Shown as
+        # "no transcript", it read as a broken bridge and two selves asked him to resend.
+        self.assertEqual(rc.with_attachments("", ["v.ogg"], voice=True, saved={"v.ogg": ("file", "/s/v.ogg")},
+                                             transcript="  "),
+                         "[voice message, no speech heard] (audio: /s/v.ogg)")
+
 
 class InDiscordOrder(unittest.TestCase):
     """A short voice message sent after a long one is transcribed first (John, 2026-11-10)."""
