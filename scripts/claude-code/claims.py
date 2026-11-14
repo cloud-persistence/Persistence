@@ -387,8 +387,23 @@ class Claims:
         return real
 
     def live_for(self, subject):
-        """The claims for `subject` that are not done or abandoned (paused counts: a pause expires back to claimed)."""
-        return [r for r in self.all() if subject and r["subject"] == subject and r["status"] not in TERMINAL]
+        """The claims for `subject` that are not done or abandoned (paused counts: a pause expires back to claimed).
+        Fails closed (Arden's A on #37): if any claim file can't be read, a live claim for the subject can't be ruled
+        out, so this refuses instead of skipping the file the way `all()` does."""
+        if not subject:
+            return []
+        live = []
+        for path in sorted(self.dir.glob("*.json")) if self.dir.is_dir() else []:
+            if not full_id(path.stem):
+                continue
+            try:
+                record = self._load(path)
+            except Refused as e:
+                raise Refused(f"{e}; so whether subject {subject!r} already has a live claim can't be told, and no claim "
+                              f"for it is made until that file is fixed or moved")
+            if record["subject"] == subject and record["status"] not in TERMINAL:
+                live.append(record)
+        return live
 
     def create(self, task, owner, cwd, by, dispatch="none", status="claimed", origin_session=None,
                room_channel=None, room_from=None, room_upto=None, base=None, subject=None):

@@ -114,6 +114,9 @@ On the server (Linux):
    Publishing on Windows and copying over loses the execute bit and the folder's permissions: after
    unpacking, `chown -R root:root` and `chmod -R a+rX` the folder and `chmod 755` the executable, or the
    service fails with "Permission denied" (status 203/EXEC) and the hooks bring nothing.
+   **First install only.** Every later change to the store or the hooks goes through
+   `scripts/claude-code/deploy-remote.sh --claim <deploy claim> <host> [user ...]`. That checks the deploy claim
+   and the host's deploy authorization, and installs under the host's lock (docs/design/task-claims.md, "Subject").
 2. An embedder for recall by meaning, the same model the store's vectors were made with:
    `python scripts/claude-code/embed_install.py` sets it up (model by checksum, llama-server, a localhost
    launcher) and prints the settings to add. By hand, e.g.

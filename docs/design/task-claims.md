@@ -369,7 +369,12 @@ deploy while the first was still live, so two sessions were each cleared to depl
   of the caller's own self that is closed (`ptask closed <id>`). Anything else is refused (exit 5), naming the bound
   claim. The holder frees it with `deploy-remote.sh --release --claim <id> <host>`, while holding that claim or after
   closing it. The script reads the authorization first and compares it again under the lock, so a change in between
-  is refused. Together with the claim check, this stops a second claim deploying after the first has finished
+  is refused.
+- **Fails closed** (Arden's review of #37). If any claim file can't be read, a claim with a subject is refused,
+  because a live claim for that subject can't be ruled out. Once the host's lock is held, the host says `LOCKED` and
+  waits, and the script runs `holds` again in the caller's own claims, right before anything is installed. A claim
+  closed or taken during the build therefore refuses (exit 3), and nothing is installed or bound. Each run's staging
+  directory must be new. Together with the claim check, this stops a second claim deploying after the first has finished
   (Arden 1571042268406882415).
 - **Older records** have no `subject` key. They read as `subject: null` and gain the key at their next write. No
   other key may be missing.

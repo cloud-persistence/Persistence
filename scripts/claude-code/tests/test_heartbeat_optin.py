@@ -612,6 +612,30 @@ class HostWideDeploy(FakeHost, unittest.TestCase):
         self.assertIn("changed while this run checked it", run.stderr)
         self.untouched_store()
 
+    def test_a_claim_closed_during_the_build_refuses_under_the_lock(self):
+        # Arden's B: the claim passes the first check, then is closed before the host's lock is taken (here, just
+        # before the remote script starts). The check under the lock refuses, and nothing is installed or bound.
+        fake_ssh = self.w / "bin" / "ssh"
+        close = (f'{sys.executable} -c "import sys; sys.path.insert(0, \'{REPO}\'); import claims; '
+                 f'claims.Claims(\'{self.state}\', home=\'{self.w}\').done(\'{self.claim}\', \'{self.me}\')"')
+        fake_ssh.write_text(fake_ssh.read_text().replace("exec bash", f'case "$c" in *"echo LOCKED"*) {close};; esac; exec bash'))
+        run = self.deploy(check=False)
+        self.assertEqual(run.returncode, 3, run.stderr)
+        self.assertIn("no longer held once the host's lock was taken", run.stderr)
+        self.untouched_store()
+        self.assertIsNone(self.bound())
+        self.assertEqual(list(self.tmp.iterdir()), [], "the refused run's staging directory is removed")
+
+    def test_a_staging_directory_that_already_exists_refuses_before_the_lock(self):
+        # Arden's C: `mkdir -p` would reuse another run's directory. The stage must be new.
+        fake_ssh = self.w / "bin" / "ssh"
+        fake_ssh.write_text(fake_ssh.read_text().replace(
+            "exec bash", 'case "$c" in "mkdir -m 700 "*) mkdir -p "${c##* }";; esac; exec bash'))
+        run = self.deploy(check=False)
+        self.assertNotEqual(run.returncode, 0)
+        self.untouched_store()
+        self.assertFalse((self.opt / ".deploy.holder").exists(), "the lock was never reached")
+
     def untouched_store(self):
         self.assertFalse((self.opt / "store" / "persistence-store").exists())
 

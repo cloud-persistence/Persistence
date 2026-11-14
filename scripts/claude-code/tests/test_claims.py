@@ -172,6 +172,21 @@ class OneClaimPerSubject(Base):
             t.join()
         self.assertEqual(sum(r is not None for r in results), 1)
 
+    def test_an_unreadable_claim_file_refuses_a_subject_claim(self):
+        # Arden's A on #37: a live deploy claim whose file is truncated or has an extra key was skipped, and a second
+        # deploy claim went through. Now it refuses; a claim with no subject is unaffected.
+        first = self.deploy()
+        path = self.state / "tasks" / f"{first['id']}.json"
+        good = path.read_text()
+        for bad in ("{", json.dumps(dict(json.loads(good), extra=1))):
+            path.write_text(bad)
+            before = self.files()
+            with self.assertRaises(claims.Refused) as e:
+                self.deploy(owner=sid())
+            self.assertIn("can't be told", str(e.exception))
+            self.assertEqual(self.files(), before)
+        self.mine()
+
     def test_a_claim_from_before_subjects_reads_and_writes_back_with_subject_null(self):
         record = self.mine()
         path = self.state / "tasks" / f"{record['id']}.json"

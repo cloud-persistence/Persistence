@@ -74,10 +74,16 @@ py=(hook.py coordination.py claims.py cwd_exec.py run_line.py observed.py heartb
 stage=/tmp/persistence-deploy.$claim.$$
 ssh "$host" "mkdir -m 700 $stage"
 scp -q "$work/store.tgz" "${py[@]/#/$repo/scripts/claude-code/}" "$host:$stage/"
-ssh "$host" "set -e
+# Arden's B: the claim is checked again once the host's lock is held, right before anything is installed. The host
+# says LOCKED (lock held, authorization unchanged) and waits; this side re-runs `holds` in the caller's own claims and
+# answers go or stop. Anything but go, an EOF included, refuses there with nothing installed.
+coproc REMOTE { ssh "$host" "set -e
   trap 'rm -rf $stage' EXIT
   sudo touch /opt/persistence/.deploy.lock
   $same
+  echo LOCKED
+  read -r go || true
+  if [ \"\$go\" != go ]; then echo \"deploy refused: claim $claim was no longer held once the host's lock was taken\" >&2; exit 3; fi
   if [ \"\${cur%% *}\" != $claim ]; then
     echo \"$claim \$(id -un) ${CLAUDE_CODE_SESSION_ID:-} \$(date -u +%Y-%m-%dT%H:%M:%SZ)\" | sudo tee $auth >/dev/null
     echo \"the host's deploy authorization is now bound to claim $claim\${cur:+ (was: \$cur)}\"
@@ -102,4 +108,14 @@ ssh "$host" "set -e
   done
   for s in \$(systemctl list-units --type=service --no-legend 'persistence-store*' | awk '{print \$1}'); do sudo systemctl restart \$s; done
   sleep 5
-  systemctl is-active \$(systemctl list-units --type=service --all --no-legend 'persistence-store*' | awk '{print \$1}')"
+  systemctl is-active \$(systemctl list-units --type=service --all --no-legend 'persistence-store*' | awk '{print \$1}')"; }
+exec {from}<&"${REMOTE[0]}" {to}>&"${REMOTE[1]}"
+remote=$REMOTE_PID
+if IFS= read -r line <&"$from" && [ "$line" = LOCKED ]; then
+  if "${claims[@]}" holds "$claim" deploy >/dev/null; then echo go >&"$to"; else echo stop >&"$to"; fi
+fi
+exec {to}>&-
+cat <&"$from"
+rc=0
+wait "$remote" || rc=$?
+exit "$rc"
