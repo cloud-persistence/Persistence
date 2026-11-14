@@ -16,7 +16,8 @@ import no_real_claude  # noqa: E402,F401  first: no test can start a real claude
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from test_heartbeat_decisions import Base, sid, T0  # noqa: E402
-from test_heartbeat_stalled import Lifecycle, at  # noqa: E402
+import test_heartbeat_stalled as stalled  # noqa: E402  (a module, so none of its test classes run twice here)
+at = stalled.at
 import claims  # noqa: E402
 import coordination  # noqa: E402
 import heartbeat  # noqa: E402
@@ -103,11 +104,18 @@ class PreLedgerClaimsOn(PreLedger):
         self.assertFalse(any("never-started" in l for l in self.lines), self.lines)
 
 
-class PreLedgerStalledLayer(Lifecycle):
+class PreLedgerStalledLayer(stalled.Base):
     """The stalled layer takes its own snapshot (stalled_layer's re-snapshot), so it needs the boundary too (Arden's
     point 2 on #38), and a queued entry whose wake is pre-ledger is unqueued, not left queued forever and not counted
     as a failed attempt (point 3). Both R and Q are fired, then never start; the boundary is written after their
     enqueue, which can't happen today (heartbeat items come after any boundary) but is the case the states must cover."""
+
+    def setUp(self):
+        super().setUp()  # as test_heartbeat_stalled.Lifecycle: activity at 06:33 and one reported unit, so R and Q fire
+        self.activity(at(6, 33))
+        data = self.hb()
+        data["reported"]["unit:x.service:ab:failed"] = at(5, 0).isoformat()
+        heartbeat.save(self.state, data)
 
     def run_it(self, with_since):
         self.beat(at(8, 8))
