@@ -9,6 +9,16 @@ work lives in [TODO.md](TODO.md); the *why* behind big choices lives in [adr/](a
 remembering, a behaviour or config change). Skip purely mechanical commits (formatting, a typo). Group a
 day's work under a dated heading; a short bold lead-in per change beats a bare bullet.
 
+## 2026-11-14 — ledger_since: firings from before the run line aren't "never started"
+
+**Beat 1's report that wake 92acf9f9 never started was false.** It ran and succeeded on 11-12, before the run line
+wrote `started`/`finished` facts. All 63 of my work firings from before 2026-11-13T04:45:12Z have only an `enqueued`
+fact. With TASKCLAIMS off, as in rollback step 2, 62 of them would have been reported falsely. Now
+`state/ledger-since` marks where the ledger's coverage begins. deploy-remote.sh writes it once per named user: the
+earliest `started` fact, or the deploy time when there's none. An enqueued-only firing from before it is `pre-ledger`,
+and nothing reports or retries it. Started, crashed and failed firings are still judged as before, whatever their age.
+This is Arden's choice: written at deploy, because the boundary is a known fact rather than something to infer.
+
 ## 2026-11-14 — Deploy guard: one live claim per job, and the deploy checks it holds that claim
 
 **After this morning's duplicate deploy claims** (incident #18518): two sessions held claims for one deploy. Only

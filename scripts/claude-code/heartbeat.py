@@ -370,7 +370,8 @@ class Beat:
         self.facts = facts
         self.table = claims.process_table()
         self.outs = self.outputs(facts)
-        self.states = firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs)
+        self.states = firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs,
+                                    coordination.ledger_since(self.state))
         self.enq = {f["firing"]: f for f in facts if f.get("fact") == "enqueued" and isinstance(f.get("firing"), str)}
         self.claims_on = claims.enabled(self.home)
         self.ledger_ok = True
@@ -724,7 +725,8 @@ class Beat:
                 return
             self.facts = facts
             self.outs = self.outputs(facts)
-            self.states = firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs)
+            self.states = firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs,
+                                    coordination.ledger_since(self.state))
             self.enq = {f["firing"]: f for f in facts if f.get("fact") == "enqueued" and isinstance(f.get("firing"), str)}
             self.hb_items = {w["id"]: w for w in self.queue if isinstance(w.get("hb"), str)}
             self.hb_fired = {f: e for f, e in self.enq.items() if isinstance(e.get("hb"), str)}
@@ -1312,9 +1314,10 @@ def wrapper_alive(pid, start):
     return pid is not None and start is not None and run_line.start_time(pid) == start
 
 
-def firing_states(facts, now, table, alive, seen, outputs):
+def firing_states(facts, now, table, alive, seen, outputs, since=None):
     """Per firing id, its derived state (heartbeat.md, "States"), or None while no decision can be made yet: running,
-    never-started (enqueued, no start, past the start grace), crashed (started, nothing alive, for a full beat after
+    never-started (enqueued, no start, past the start grace), pre-ledger (enqueued only, before `since`, the ledger's
+    coverage: whether it started is unknown, so nothing is reported or retried), crashed (started, nothing alive, for a full beat after
     first seen so), failed (finished with is_error, a missing or unparseable output, or a non-zero exit), ok, taken.
     `seen` is heartbeat.json's crashed_seen, updated here; `outputs` maps an output file name to its parsed JSON or None."""
     import claims
@@ -1346,7 +1349,9 @@ def firing_states(facts, now, table, alive, seen, outputs):
                     state = "crashed"
         elif "enqueued" in got:
             at = _time(got["enqueued"].get("at"))
-            if at is not None and now - at >= START_GRACE:
+            if at is not None and since is not None and at < since:
+                state = "pre-ledger"
+            elif at is not None and now - at >= START_GRACE:
                 state = "never-started"
         states[firing] = state
     return states

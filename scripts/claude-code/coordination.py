@@ -203,3 +203,65 @@ def enqueued_ids(state):
     """Every firing id with an `enqueued` fact."""
     facts, _ = snapshot(state)
     return {f.get("firing") for f in facts if f.get("fact") == "enqueued"}
+
+
+# Where the ledger's coverage begins (ledger_since; Arden 1571129057112752299, after the 2026-11-14 false "never
+# started" for 92acf9f9): the run line wrote no started/finished facts before it was deployed, so an `enqueued`-only
+# firing from before then says nothing about whether it started. state/ledger-since holds one ISO UTC time, written
+# once at deploy (deploy-remote.sh runs `seed-ledger-since` as each named user) and never rewritten. Its value is the
+# ledger's earliest `started` fact, which is when the run line was first live; with none, the time of seeding, which is
+# right for a self that has never launched anything ("empty-safe"). Missing or unreadable reads as None: no boundary,
+# every firing judged as before.
+LEDGER_SINCE = "ledger-since"
+
+
+def _iso(value):
+    from datetime import datetime
+    try:
+        moment = datetime.fromisoformat(value.strip()) if isinstance(value, str) else None
+    except ValueError:
+        return None
+    return moment if moment is not None and moment.tzinfo else None
+
+
+def ledger_since(state):
+    """The boundary as an aware datetime, or None (no file, or not one aware ISO time)."""
+    try:
+        return _iso((Path(state) / LEDGER_SINCE).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def seed_ledger_since(state, now=None):
+    """Write state/ledger-since once: (value, True) when written, (existing text, False) when it was already there.
+    Created with O_EXCL, so two seeders can't both write and an existing file is never replaced."""
+    from datetime import datetime, timezone
+    state = Path(state)
+    path = state / LEDGER_SINCE
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip(), False
+    state.mkdir(parents=True, exist_ok=True)
+    facts, _ = snapshot(state)
+    starts = [m for m in (_iso(f.get("at")) for f in facts if f.get("fact") == "started") if m is not None]
+    moment = min(starts) if starts else (now or datetime.now(timezone.utc))
+    value = moment.astimezone(timezone.utc).isoformat(timespec="seconds")
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o644)
+    except FileExistsError:
+        return path.read_text(encoding="utf-8").strip(), False
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(value + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    return value, True
+
+
+if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] != ["seed-ledger-since"]:
+        print("usage: coordination.py seed-ledger-since   (state: $PERSISTENCE_STATE_DIR or ~/.claude/persistence/state)",
+              file=sys.stderr)
+        sys.exit(2)
+    where = os.environ.get("PERSISTENCE_STATE_DIR") or str(Path.home() / ".claude" / "persistence" / "state")
+    value, wrote = seed_ledger_since(where)
+    print(f"ledger-since {'written' if wrote else 'already'} {value}")
