@@ -66,8 +66,14 @@ tar -czf "$work/store.tgz" -C "$work/pub" .
 # sources from observed.py; persistence-heartbeat@.service runs heartbeat.py from the same place (a beat with the switch
 # off exits at its first line, so deploying it turns nothing on): all seven go beside it. A file that differs from the one
 # it replaces is copied first to ~/.claude/persistence/previous/<UTC stamp>/ and named in the output, so nothing is
-# overwritten silently and the way back is a copy, not a guess. Every user named gets every file: a self whose heartbeat
-# is live gets its running heartbeat.py replaced, so name only the selves whose code was reviewed for this deploy.
+# overwritten silently and the way back is a copy, not a guess. Each user's ledger-since is then written if it isn't
+# there yet (coordination.py, seed-ledger-since: once, never rewritten), so the heartbeat knows where its ledger begins;
+# a seeding that fails says "ledger-since NOT written" and the deploy goes on (no file: every firing judged as before).
+# Every user named gets every file: a self whose heartbeat is live gets its running heartbeat.py replaced, so name only
+# the selves whose code was reviewed for this deploy. Name only Claude Code selves: this installs into and seeds
+# ~/.claude/persistence. A Codex self (Ember) keeps its hook and state under ~/.codex/persistence and runs no
+# persistence-heartbeat@ unit, so naming one would install files and seed a ledger-since nothing of theirs reads; their
+# files change through them (#14953).
 py=(hook.py coordination.py claims.py cwd_exec.py run_line.py observed.py heartbeat.py)
 # Each run stages in its own new directory (mkdir fails if it exists), so a run refused at the lock can't have
 # overwritten what the running one copied.
@@ -105,6 +111,11 @@ coproc REMOTE { ssh "$host" "set -e
       sudo install -o \$u -g \$u -m 644 $stage/\$f \$d/\$f
     done
     if [ -n \"\$kept\" ]; then echo \"\$u: replaced\$kept; the copies they replaced are in \$d/previous/\$stamp\"; else echo \"\$u: no hook file changed\"; fi
+    if seeded=\$(sudo -u \$u env PERSISTENCE_STATE_DIR=\$d/state python3 -I \$d/coordination.py seed-ledger-since); then
+      echo \"\$u: \$seeded\"
+    else
+      echo \"\$u: ledger-since NOT written (seed-ledger-since failed, above); its heartbeat judges every firing as before\"
+    fi
   done
   for s in \$(systemctl list-units --type=service --no-legend 'persistence-store*' | awk '{print \$1}'); do sudo systemctl restart \$s; done
   sleep 5

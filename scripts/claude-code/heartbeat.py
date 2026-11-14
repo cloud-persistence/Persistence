@@ -362,6 +362,13 @@ class Beat:
                     out[name] = None
         return out
 
+    def judge(self, facts):
+        """Every firing's state from one snapshot, with the ledger's boundary (ledger_since). Both snapshots of a beat,
+        rows A and C's and the stalled layer's, go through here, so neither can judge without the boundary (Arden's
+        point 2 on #38)."""
+        return firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs,
+                             coordination.ledger_since(self.state))
+
     def ledger_decisions(self, facts):
         """Rows A and C from a complete snapshot. Recovery decisions (C, A's hand-off retry and nudge deferrals) run
         before A's report decisions, so a usage-refused nudge is deferred, not reported as a stall."""
@@ -370,7 +377,7 @@ class Beat:
         self.facts = facts
         self.table = claims.process_table()
         self.outs = self.outputs(facts)
-        self.states = firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs)
+        self.states = self.judge(facts)
         self.enq = {f["firing"]: f for f in facts if f.get("fact") == "enqueued" and isinstance(f.get("firing"), str)}
         self.claims_on = claims.enabled(self.home)
         self.ledger_ok = True
@@ -724,7 +731,7 @@ class Beat:
                 return
             self.facts = facts
             self.outs = self.outputs(facts)
-            self.states = firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs)
+            self.states = self.judge(facts)
             self.enq = {f["firing"]: f for f in facts if f.get("fact") == "enqueued" and isinstance(f.get("firing"), str)}
             self.hb_items = {w["id"]: w for w in self.queue if isinstance(w.get("hb"), str)}
             self.hb_fired = {f: e for f, e in self.enq.items() if isinstance(e.get("hb"), str)}
@@ -877,6 +884,11 @@ class Beat:
             state = self.states.get(wake)
             if state in (None, "running") or intents.get(wake) == "live":
                 continue  # an ack in flight: no failure, and not unqueued; it records under the lock, or is abandoned
+            if state == "pre-ledger":
+                # Enqueued before the ledger began: whether it ran is unknown, so it isn't a failed attempt, but it
+                # can't still be waiting either. Unqueued, so the state set stays complete (Arden's point 3 on #38).
+                self.unqueue(key, entry, failed=False)
+                continue
             if state in ("never-started", "crashed", "failed", "ok", "taken"):
                 # ok with the entry still queued: the block never reached the session, or its ack was abandoned after
                 # the block was shown (an intent says so: retryable, not a failed attempt).
@@ -1312,9 +1324,10 @@ def wrapper_alive(pid, start):
     return pid is not None and start is not None and run_line.start_time(pid) == start
 
 
-def firing_states(facts, now, table, alive, seen, outputs):
+def firing_states(facts, now, table, alive, seen, outputs, since=None):
     """Per firing id, its derived state (heartbeat.md, "States"), or None while no decision can be made yet: running,
-    never-started (enqueued, no start, past the start grace), crashed (started, nothing alive, for a full beat after
+    never-started (enqueued, no start, past the start grace), pre-ledger (enqueued only, before `since`, the ledger's
+    coverage: whether it started is unknown, so nothing is reported or retried), crashed (started, nothing alive, for a full beat after
     first seen so), failed (finished with is_error, a missing or unparseable output, or a non-zero exit), ok, taken.
     `seen` is heartbeat.json's crashed_seen, updated here; `outputs` maps an output file name to its parsed JSON or None."""
     import claims
@@ -1346,7 +1359,9 @@ def firing_states(facts, now, table, alive, seen, outputs):
                     state = "crashed"
         elif "enqueued" in got:
             at = _time(got["enqueued"].get("at"))
-            if at is not None and now - at >= START_GRACE:
+            if at is not None and since is not None and at < since:
+                state = "pre-ledger"
+            elif at is not None and now - at >= START_GRACE:
                 state = "never-started"
         states[firing] = state
     return states

@@ -428,7 +428,7 @@ class FakeHost:
                     f'cp "${{a[@]}}" "$d"'),
             "ssh": (f'c="$2"; c=${{c//\\/tmp\\//{self.tmp}/}}; c=${{c//\\/home\\//{w}/home/}}; '
                     f'c=${{c//\\/opt\\/persistence\\//{self.opt}/}}; exec bash -c "$c"'),
-            "sudo": 'case "$1" in chown|chmod|systemctl) exit 0;; esac; exec "$@"',
+            "sudo": '[ "$1" = -u ] && shift 2; case "$1" in chown|chmod|systemctl) exit 0;; esac; exec "$@"',
             "systemctl": "exit 0", "sleep": "exit 0"}
         for name, body in fakes.items():
             (bins / name).write_text(f"#!/bin/bash\n{body}\n")
@@ -479,10 +479,26 @@ class DeployRemote(FakeHost, unittest.TestCase):
         self.assertEqual([p.name for p in kept[0].parent.iterdir()], ["heartbeat.py"])  # identical files aren't kept
         self.assertIn("replaced heartbeat.py", out)
         self.assertEqual((self.dest / "heartbeat.py").read_bytes(), (REPO / "heartbeat.py").read_bytes())
-        self.assertIn("no hook file changed", self.deploy().stdout)
+        self.assertIn(f"{self.user}: ledger-since written", out)  # an empty ledger: the time of this deploy
+        since = (self.dest / "state" / "ledger-since").read_text()
+        again = self.deploy().stdout
+        self.assertIn("no hook file changed", again)
+        self.assertIn(f"{self.user}: ledger-since already {since.strip()}", again)
+        self.assertEqual((self.dest / "state" / "ledger-since").read_text(), since)
         self.assertEqual(len(list((self.dest / "previous").iterdir())), 1)
         self.assertEqual(list(self.tmp.iterdir()), [], "each run's staging directory is removed")
         self.assertIn(f"claim {self.claim}, session {self.me}", (self.opt / ".deploy.holder").read_text())
+
+
+class DeploySeedFails(FakeHost, unittest.TestCase):
+    def test_a_failed_seeding_says_so_and_the_deploy_goes_on(self):
+        # Arden's point 4 on #38: `echo "$u: $(seed)"` printed an empty value under set -e and looked like success.
+        self.fake_host()
+        (self.dest / "state").write_text("not a directory")  # seed-ledger-since can't create state/ledger-since
+        run = self.deploy()
+        self.assertIn(f"{self.user}: ledger-since NOT written", run.stdout)
+        self.assertNotIn("ledger-since written", run.stdout)
+        self.assertEqual((self.dest / "heartbeat.py").read_bytes(), (REPO / "heartbeat.py").read_bytes())
 
 
 class DeployGuard(FakeHost, unittest.TestCase):

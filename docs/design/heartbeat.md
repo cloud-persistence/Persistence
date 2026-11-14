@@ -272,11 +272,21 @@ ledger shows `enqueued` with no `started`: the wake is on record, not lost.
 | State | Facts | Meaning |
 |---|---|---|
 | `running` | `started`, no `finished`, and the session holds a process by exact id (or the wrapper pid with the same start time is alive) | leave it alone |
-| `never-started` | `enqueued`, no `started`, older than the **start grace** (5 min) | eligible for recovery |
+| `never-started` | `enqueued`, no `started`, older than the **start grace** (5 min), at or after `ledger-since` | eligible for recovery |
+| `pre-ledger` | `enqueued` only, from before `state/ledger-since` | unknown whether it started (the run line wasn't writing yet); nothing, in every row. A stalled-layer entry still queued on one is unqueued, not as a failed attempt |
 | `crashed` | `started`, no `finished`, neither the session nor the wrapper (pid and start time) alive, for at least one full beat after first seen so | eligible for recovery |
 | `failed` | `finished`, and the output has `is_error: true`, or is missing or unparseable, or the exit status is non-zero | eligible for recovery; a usage limit (below) is a deferral |
 | `ok` | `finished`, exit 0, `is_error` false | nothing |
 | `taken` | `taken` | went to a live session; nothing |
+
+`state/ledger-since` (one ISO UTC time; coordination.py) is where the ledger's coverage begins. deploy-remote.sh
+writes it once for each user it names, and never rewrites it. The value is the earliest `started` fact, or the
+deploy time if there is none yet. Missing or unreadable means no boundary, as before it existed. Added after the
+false "never started" for 92acf9f9 on 2026-11-14 (Arden 1571129057112752299). The boundary is inclusive: a firing enqueued
+exactly at it is covered. Both of a beat's snapshots (rows A and C's, and the stalled layer's) judge through one helper
+(`Beat.judge`), so neither can drop the boundary. A Codex self keeps its state under `~/.codex/persistence/state` and
+runs no `persistence-heartbeat@` unit, so deploy-remote.sh (which installs into and seeds `~/.claude/persistence`)
+names only Claude Code selves.
 
 `owner-never-started` is derived on top of these for a claim firing (see row A): the firing is `never-started`,
 `crashed` or `failed`, its claim is `claimed` by the harness with owner = the firing's `session`, and no transcript
