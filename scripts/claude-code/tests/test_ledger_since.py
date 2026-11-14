@@ -16,6 +16,7 @@ import no_real_claude  # noqa: E402,F401  first: no test can start a real claude
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from test_heartbeat_decisions import Base, sid, T0  # noqa: E402
+from test_heartbeat_stalled import Lifecycle, at  # noqa: E402
 import claims  # noqa: E402
 import coordination  # noqa: E402
 import heartbeat  # noqa: E402
@@ -36,6 +37,18 @@ class PreLedger(Base):
         self.since(300)
         self.beat()
         self.assertEqual(self.keys(), [f"wake:{new}:never-started"])
+
+    def test_a_firing_enqueued_exactly_at_the_boundary_is_judged(self):
+        # Arden's point 1 on #38: the boundary is inclusive ("at or after", heartbeat.md), so `at == since` is covered by
+        # the ledger and an enqueued-only firing there is never-started. `<` -> `<=` survived before this test.
+        f, _ = self.fire(how="never-started", minutes_ago=300, work=True)
+        self.since(300)
+        self.beat()
+        self.assertEqual(self.keys(), [f"wake:{f}:never-started"])
+        facts, _ = coordination.snapshot(self.state)
+        since = coordination.ledger_since(self.state)
+        self.assertEqual(heartbeat.firing_states(facts, self.now, [], lambda *a: False, {}, {}, since=since)[f],
+                         "never-started")
 
     def test_without_the_file_both_are_reported_as_before(self):
         old, _ = self.fire(how="never-started", minutes_ago=600, work=True)
@@ -88,6 +101,33 @@ class PreLedgerClaimsOn(PreLedger):
         self.beat()
         self.assertEqual(self.items(), [])
         self.assertFalse(any("never-started" in l for l in self.lines), self.lines)
+
+
+class PreLedgerStalledLayer(Lifecycle):
+    """The stalled layer takes its own snapshot (stalled_layer's re-snapshot), so it needs the boundary too (Arden's
+    point 2 on #38), and a queued entry whose wake is pre-ledger is unqueued, not left queued forever and not counted
+    as a failed attempt (point 3). Both R and Q are fired, then never start; the boundary is written after their
+    enqueue, which can't happen today (heartbeat items come after any boundary) but is the case the states must cover."""
+
+    def run_it(self, with_since):
+        self.beat(at(8, 8))
+        self.drain("never-started", ack=False)
+        if with_since:
+            (self.state / "ledger-since").write_text(at(8, 5).isoformat() + "\n")
+        self.beat(at(8, 18))
+        d = self.hb()
+        return d.get("delivery_fault"), d["quiet"], d["reports_q"]["unit:x.service:ab:failed"]
+
+    def test_without_the_boundary_both_are_failed_attempts(self):
+        fault, q, r = self.run_it(False)
+        self.assertEqual(fault["counts"]["hb_failed"], 2)
+        self.assertEqual((q["failures"], r["failures"], r["state"]), (1, 1, "none"))
+
+    def test_pre_ledger_heartbeat_firings_are_no_fault_and_no_failed_attempt(self):
+        fault, q, r = self.run_it(True)
+        self.assertIsNone(fault)
+        self.assertEqual((q["failures"], r["failures"], r["state"]), (0, 0, "none"))
+        self.assertEqual((q["state"], q["attempt"]), ("queued", 2))  # unqueued, then Q queued again this beat
 
 
 class Seed(unittest.TestCase):

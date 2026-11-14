@@ -18,6 +18,11 @@ fact. With TASKCLAIMS off, as in rollback step 2, 62 of them would have been rep
 earliest `started` fact, or the deploy time when there's none. An enqueued-only firing from before it is `pre-ledger`,
 and nothing reports or retries it. Started, crashed and failed firings are still judged as before, whatever their age.
 This is Arden's choice: written at deploy, because the boundary is a known fact rather than something to infer.
+From Arden's review: the boundary is inclusive and tested there; both snapshots of a beat judge through one helper,
+with a test that fails if the stalled layer's drops the boundary; a stalled-layer entry still queued on a `pre-ledger`
+wake is unqueued, not counted as a failed attempt; and a seeding that fails now says `ledger-since NOT written` in the
+deploy output instead of printing an empty value. deploy-remote.sh names only Claude Code selves (a Codex self's state
+is under `~/.codex`).
 
 ## 2026-11-14 — Deploy guard: one live claim per job, and the deploy checks it holds that claim
 

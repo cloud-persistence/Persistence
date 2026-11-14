@@ -362,6 +362,13 @@ class Beat:
                     out[name] = None
         return out
 
+    def judge(self, facts):
+        """Every firing's state from one snapshot, with the ledger's boundary (ledger_since). Both snapshots of a beat,
+        rows A and C's and the stalled layer's, go through here, so neither can judge without the boundary (Arden's
+        point 2 on #38)."""
+        return firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs,
+                             coordination.ledger_since(self.state))
+
     def ledger_decisions(self, facts):
         """Rows A and C from a complete snapshot. Recovery decisions (C, A's hand-off retry and nudge deferrals) run
         before A's report decisions, so a usage-refused nudge is deferred, not reported as a stall."""
@@ -370,8 +377,7 @@ class Beat:
         self.facts = facts
         self.table = claims.process_table()
         self.outs = self.outputs(facts)
-        self.states = firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs,
-                                    coordination.ledger_since(self.state))
+        self.states = self.judge(facts)
         self.enq = {f["firing"]: f for f in facts if f.get("fact") == "enqueued" and isinstance(f.get("firing"), str)}
         self.claims_on = claims.enabled(self.home)
         self.ledger_ok = True
@@ -725,8 +731,7 @@ class Beat:
                 return
             self.facts = facts
             self.outs = self.outputs(facts)
-            self.states = firing_states(facts, self.now, self.table, wrapper_alive, self.data["crashed_seen"], self.outs,
-                                    coordination.ledger_since(self.state))
+            self.states = self.judge(facts)
             self.enq = {f["firing"]: f for f in facts if f.get("fact") == "enqueued" and isinstance(f.get("firing"), str)}
             self.hb_items = {w["id"]: w for w in self.queue if isinstance(w.get("hb"), str)}
             self.hb_fired = {f: e for f, e in self.enq.items() if isinstance(e.get("hb"), str)}
@@ -879,6 +884,11 @@ class Beat:
             state = self.states.get(wake)
             if state in (None, "running") or intents.get(wake) == "live":
                 continue  # an ack in flight: no failure, and not unqueued; it records under the lock, or is abandoned
+            if state == "pre-ledger":
+                # Enqueued before the ledger began: whether it ran is unknown, so it isn't a failed attempt, but it
+                # can't still be waiting either. Unqueued, so the state set stays complete (Arden's point 3 on #38).
+                self.unqueue(key, entry, failed=False)
+                continue
             if state in ("never-started", "crashed", "failed", "ok", "taken"):
                 # ok with the entry still queued: the block never reached the session, or its ack was abandoned after
                 # the block was shown (an intent says so: retryable, not a failed attempt).

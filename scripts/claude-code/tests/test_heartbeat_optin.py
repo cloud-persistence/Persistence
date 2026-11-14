@@ -490,6 +490,17 @@ class DeployRemote(FakeHost, unittest.TestCase):
         self.assertIn(f"claim {self.claim}, session {self.me}", (self.opt / ".deploy.holder").read_text())
 
 
+class DeploySeedFails(FakeHost, unittest.TestCase):
+    def test_a_failed_seeding_says_so_and_the_deploy_goes_on(self):
+        # Arden's point 4 on #38: `echo "$u: $(seed)"` printed an empty value under set -e and looked like success.
+        self.fake_host()
+        (self.dest / "state").write_text("not a directory")  # seed-ledger-since can't create state/ledger-since
+        run = self.deploy()
+        self.assertIn(f"{self.user}: ledger-since NOT written", run.stdout)
+        self.assertNotIn("ledger-since written", run.stdout)
+        self.assertEqual((self.dest / "heartbeat.py").read_bytes(), (REPO / "heartbeat.py").read_bytes())
+
+
 class DeployGuard(FakeHost, unittest.TestCase):
     """The deploy guard, parts 1 and 2 (2026-11-14 duplicate deploy claims, #18519): no run without the caller holding the live
     deploy claim, and no run while another holds the host's lock. A refused run changes nothing on the host."""
