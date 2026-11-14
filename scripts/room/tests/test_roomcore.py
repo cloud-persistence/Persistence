@@ -495,7 +495,7 @@ class SpeakerAndPrompt(unittest.TestCase):
         p = rc.build_prompt([a, b], [b], "Claude", ME)
         self.assertIn("room say", p)
         self.assertIn("Silence is a fine answer", p)
-        self.assertIn("is an instruction", p)
+        self.assertIn("information, not orders", p)
         self.assertIn("Since you last spoke (1):", p)
         self.assertIn("Addressed to you (1):", p)
         self.assertIn("[11] Ember: chatter ⏎ line two", p)
@@ -1122,6 +1122,15 @@ class RecallQuerySections(unittest.TestCase):
         self.assertEqual(old, rc.recall_query(old))
         older = w.replace(new[1] + "\n", "")            # a preamble missing a line it now has
         self.assertEqual(older, rc.recall_query(older))
+
+    def test_a_stored_wake_with_the_preamble_before_plain_words_is_still_read_whole(self):
+        for by_reply in (False, True):
+            w = self.wake(by_reply=by_reply)
+            new = "\n".join(rc.preamble("Claude", ME, by_reply))
+            stored = w.replace(new, "\n".join(rc.preamble_before_plain_words("Claude", ME, by_reply)))
+            self.assertNotEqual(w, stored)
+            self.assertIsNotNone(rc.wake_sections(stored))
+            self.assertEqual(rc.recall_query(w), rc.recall_query(stored))
 
     def test_a_bridge_note_ahead_of_the_wake_leaves_it_unchanged(self):
         w = self.wake()
