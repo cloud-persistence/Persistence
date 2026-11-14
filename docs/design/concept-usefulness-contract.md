@@ -68,7 +68,7 @@ so this section budgets each output on its own.
 **Output A, `observe_hook` (hook.py:1715-1718):** the inbox notices ("For work, from your other sessions"),
 then Observed now. No concept section goes here.
 
-1. **Inbox notices**, at most 8,000 (CAP less Observed now's bound). Today they have no bound short of CAP and
+1. **Inbox notices**, at most 7,500. Today they have no bound short of CAP and
    are cut mid-text when they reach it, after every notice has already been archived, so the cut part is never
    shown. The build PR cuts them at a whole notice, ends with the omission line below, and leaves each omitted
    notice unarchived so it comes at the next turn.
@@ -93,9 +93,14 @@ then Observed now. No concept section goes here.
 
 Unused budget in one section isn't passed to another. The bounds stay fixed so the block is predictable.
 
-**What could reach CAP.** Every section above is bounded, and output B's bounds sum to 9,000, which leaves
-500 for its headings. So nothing should reach CAP: a test asserts that each output's bounds and headings
-sum to at most CAP. If an output still would, that is a bug, and the backstop cuts in this order: recall items,
+**Every bound includes its section's heading and its omission line.** A section's text, heading and
+`N omitted` line together stay within the number given; nothing is added on top. So output A's bounds sum to
+9,000 (7,500 + 1,500) and output B's to 9,000 (1,000 + 1,200 + 3,300 + 3,500), each 500 under CAP, which is
+left for the output's own framing and as margin.
+
+**What could reach CAP.** Every section above is bounded, headings and omission lines included. So nothing
+should reach CAP: a test asserts, for each output, that the sum of its bounds is at most CAP, and that a
+rendered output with every section filled to its bound, each ending with an omission line, is at most CAP. If an output still would, that is a bug, and the backstop cuts in this order: recall items,
 lowest-ranked first; then concepts' facts beyond the first, from the lowest-ranked concept up; then whole
 concepts, lowest-ranked first; then cues. Pending decisions' count and age, and each shown concept's state
 line, are never cut.
@@ -246,9 +251,18 @@ environment variable can lift either.
    whose `Migrations` row for §10 was written by the "already applied" path, with none of its effects, is
    refused by lock 2.
 
-**Scratch copies don't outlive their run.** Each run copies the store into a fresh temporary directory under the
-scratch root and removes it on exit, whether the run passes, fails or throws. **Test U4:** after a passing run
-and after one made to throw, the scratch root holds no run directory.
+**Scratch copies never become unmanaged files.** A deleted file is out of reach of any later erasure while its
+bytes may stay on disk, so a run never creates a disk copy and deletes it. It follows concept-events §5 (E4.1):
+**by default the scratch copy is an in-memory SQLite database** (the `memdb` VFS, one fixed name per store,
+filled by the backup API), freed when its last connection closes. **If size ever forbids memory, one registered
+path from config** is used, with `secure_delete = ON` and `temp_store = MEMORY`, covered by a cleanup row, and
+**emptied in place** at the end of every run (each table deleted, VACUUM, `wal_checkpoint(TRUNCATE)`), whether
+the run passes, fails or throws. **Any other path is refused** with "unregistered scratch path". These two are
+the only "scratch root" lock 1 accepts. Every connection runs `temp_store = MEMORY`, so sorts and VACUUM don't
+spill to an unlinked temp file. **Test U4:** (a) a run given an unregistered disk path, including a fresh
+temporary directory, is refused and creates no file; (b) with the registered path, after a passing run and after
+one made to throw, the file is still there (never unlinked) and every table in it is empty; (c) with the default,
+no file is created under the scratch root or the temp directory.
 
 After both locks it is per self and opt-in. The switch is off by default, and each self's go is its own. The
 scratch slice may come first (Ember: "sequence the daily-value UI first in development"). The deletion
@@ -267,13 +281,14 @@ guarantees may not.
    `concept accept` takes one fact id. Q5 already allows one atomic command for several, with each transition
    still its own event.
 6. The scratch-root guard (U2), the applier's erasure check by effects, not by the row (U3, red on purpose,
-   with its pinned refusal; U5), and the scratch cleanup (U4), §6. The §10 migration writes the completion
+   with its pinned refusal; U5), and scratch copies in memory or one registered path emptied in place,
+   any other path refused (U4), §6. The §10 migration writes the completion
    marker lock 2 reads. Lifting the guard is a later PR of its own.
 7. The approval event for a fragment supersede records the successor's fragment id, and both the extractor's
    input selection and eligibility exclude it (§3, U1).
 8. The hook cuts the inbox notices, cues and recall at a whole item within the bounds of §2, with the omission
-   line, and leaves an omitted notice unarchived and an omitted cue unshown. A test sums each output's bounds
-   and headings against CAP.
+   line, and leaves an omitted notice unarchived and an omitted cue unshown. Each bound includes its heading
+   and omission line (inbox 7,500, Observed now 1,500), and a test checks each output against CAP (§2).
 
 ## Out of scope here, noted
 
