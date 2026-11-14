@@ -679,6 +679,7 @@ class HostWideDeploy(FakeHost, unittest.TestCase):
                 self.assertEqual(run.returncode, 5, run.stderr)
                 self.assertIn("empty or unreadable", run.stderr)
                 self.untouched_store()
+                self.assertFalse((self.opt / ".deploy.lock").exists(), "refused before the lock")
                 self.assertEqual(self.deploy("--release", "--claim", self.claim, "fakehost", check=False).returncode, 5)
                 self.assertTrue(auth.exists())
                 auth.rmdir() if auth.is_dir() else auth.unlink()
@@ -690,6 +691,7 @@ class HostWideDeploy(FakeHost, unittest.TestCase):
             self.assertEqual(run.returncode, 5, run.stderr)
             self.assertIn("empty or unreadable", run.stderr)
             self.untouched_store()
+            self.assertFalse((self.opt / ".deploy.lock").exists(), "refused before the lock")
 
     def test_an_authorization_emptied_between_check_and_lock_refuses(self):
         # The same rule under the lock: free at the first read, an empty file by the time the lock is held.

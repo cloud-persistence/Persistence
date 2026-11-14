@@ -18,7 +18,8 @@ it, and treats only an absent file as free; anything else that doesn't read as a
 left alone. The script never creates either state, so this guards hand edits and partial writes. Two gaps in tests
 from the same review are closed too: one self can't `--release` an authorization bound to another self's claim, even
 holding or having closed a deploy claim of its own; and `ptask closed` says no on a claimed or paused claim. Each new
-test fails with its check removed.
+test fails with its check removed. Arden's review found the read *before* the lock unpinned (putting the old read back
+there still refused, but only under the lock); the empty/unreadable test now also asserts no `.deploy.lock` was made.
 
 ## 2026-11-14 — ledger_since: firings from before the run line aren't "never started"
 
