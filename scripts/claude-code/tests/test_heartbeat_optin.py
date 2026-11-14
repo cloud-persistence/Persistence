@@ -2,6 +2,7 @@
 on, and refuses to say "ready" while a switch would fail silently. Fake home, fake systemctl, fake PATH: nothing real
 is read or changed, and no test calls a model."""
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -651,6 +652,55 @@ class HostWideDeploy(FakeHost, unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.untouched_store()
         self.assertFalse((self.opt / ".deploy.holder").exists(), "the lock was never reached")
+
+    def test_a_self_cant_release_an_authorization_bound_to_another_claim(self):
+        # Arden's (1) on #37: the other self holds its own live deploy claim, so it passes the first check; the host is
+        # bound to this self's claim, and --release with the other's own claim must refuse and leave the binding.
+        self.deploy()
+        run = self.other("--release", "--claim", self.other_claim, "fakehost")
+        self.assertEqual(run.returncode, 5, run.stderr)
+        self.assertIn(f"not claim {self.other_claim}", run.stderr)
+        self.assertEqual(self.bound(), self.claim)
+        # Its own claim closed changes nothing: closed lets a self release its own binding, not another's.
+        self.other_claims.done(self.other_claim, self.other_me)
+        self.assertEqual(self.other("--release", "--claim", self.other_claim, "fakehost").returncode, 5)
+        self.assertEqual(self.bound(), self.claim)
+
+    def test_an_empty_or_unreadable_authorization_refuses(self):
+        # Arden's (3) on #37, the same class as A: a .deploy.claim that exists but reads as nothing can't be told
+        # from free, so it refuses (deploy and release) and is left as it is. The script never writes either state.
+        auth = self.opt / ".deploy.claim"
+        for make, label in ((lambda: auth.write_text(""), "empty"),
+                            (lambda: auth.write_text("\n"), "blank"),
+                            (lambda: auth.mkdir(), "a directory")):
+            with self.subTest(label):
+                make()
+                run = self.deploy(check=False)
+                self.assertEqual(run.returncode, 5, run.stderr)
+                self.assertIn("empty or unreadable", run.stderr)
+                self.untouched_store()
+                self.assertEqual(self.deploy("--release", "--claim", self.claim, "fakehost", check=False).returncode, 5)
+                self.assertTrue(auth.exists())
+                auth.rmdir() if auth.is_dir() else auth.unlink()
+        if os.geteuid() != 0:  # root reads a mode-000 file
+            auth.write_text(f"{self.claim} x\n")
+            auth.chmod(0)
+            self.addCleanup(auth.chmod, 0o644)
+            run = self.deploy(check=False)
+            self.assertEqual(run.returncode, 5, run.stderr)
+            self.assertIn("empty or unreadable", run.stderr)
+            self.untouched_store()
+
+    def test_an_authorization_emptied_between_check_and_lock_refuses(self):
+        # The same rule under the lock: free at the first read, an empty file by the time the lock is held.
+        fake_ssh = self.w / "bin" / "ssh"
+        fake_ssh.write_text(fake_ssh.read_text().replace(
+            "exec bash", f'case "$c" in *"echo LOCKED"*) : > {self.opt}/.deploy.claim;; esac; exec bash'))
+        run = self.deploy(check=False)
+        self.assertEqual(run.returncode, 5, run.stderr)
+        self.assertIn("empty or unreadable", run.stderr)
+        self.untouched_store()
+        self.assertEqual((self.opt / ".deploy.claim").read_text(), "")
 
     def untouched_store(self):
         self.assertFalse((self.opt / "store" / "persistence-store").exists())

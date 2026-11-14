@@ -31,13 +31,17 @@ if "${claims[@]}" holds "$claim" deploy; then held=1
 elif [ -n "$release" ] && "${claims[@]}" closed "$claim"; then held=
 else echo "deploy refused: this session doesn't hold claim $claim for the deploy (see above)" >&2; exit 3; fi
 auth=/opt/persistence/.deploy.claim
-bound=$(ssh "$host" "cat $auth 2>/dev/null || true")
+# The authorization reads as free only when the file is absent (Arden's (3) on #37, the same class as A): a file that
+# exists but is empty, blank or unreadable can't be told from a binding, so it refuses (exit 5) and is left for its
+# self to look at. The script never writes either state. Run on the host, before the lock and again under it.
+read_auth="if [ ! -e $auth ]; then :; elif [ -f $auth ] && grep -q '[^[:space:]]' $auth; then cat $auth; else echo \"refused: the host's deploy authorization $auth exists but is empty or unreadable; nothing reads it as free\" >&2; exit 5; fi"
+bound=$(ssh "$host" "$read_auth") || exit $?
 bound_claim=${bound%% *}
 expect=$(printf %s "$bound" | sha256sum | cut -c1-64)
 # Under the flock: the authorization still reads as it did above, or this run refuses (exit 5).
 same="exec 9</opt/persistence/.deploy.lock
   if ! flock -n 9; then echo \"deploy refused: another deploy holds /opt/persistence/.deploy.lock: \$(cat /opt/persistence/.deploy.holder 2>/dev/null)\" >&2; exit 4; fi
-  cur=\$(cat $auth 2>/dev/null || true)
+  cur=\$($read_auth)
   if [ \"\$(printf %s \"\$cur\" | sha256sum | cut -c1-64)\" != $expect ]; then echo \"deploy refused: the host's deploy authorization changed while this run checked it: \$cur\" >&2; exit 5; fi"
 if [ -n "$release" ]; then
   [ "$bound_claim" = "$claim" ] || { echo "release refused: the host's deploy authorization is ${bound:-free}, not claim $claim" >&2; exit 5; }
