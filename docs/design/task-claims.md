@@ -365,7 +365,9 @@ deploy while the first was still live, so two sessions were each cleared to depl
   held. Each run copies its files to its own new staging directory. The lock stops two runs overlapping.
 - **One deploy authorization per host**, across selves, because claims are per state directory and two selves could
   each hold a live `deploy` claim (Ember 1571158094472290428). `/opt/persistence/.deploy.claim` names the claim it's
-  bound to. A deploy binds it if it's free, keeps it if it names the caller's claim, and rebinds it if it names a claim
+  bound to. It is free only when the file is absent: one that exists but is empty, blank or unreadable refuses
+  (exit 5), before the lock and under it, and is left for its self to look at (Arden's (3) on #37; the script never
+  writes either state). A deploy binds it if it's free, keeps it if it names the caller's claim, and rebinds it if it names a claim
   of the caller's own self that is closed (`ptask closed <id>`). Anything else is refused (exit 5), naming the bound
   claim. The holder frees it with `deploy-remote.sh --release --claim <id> <host>`, while holding that claim or after
   closing it. The script reads the authorization first and compares it again under the lock, so a change in between

@@ -243,6 +243,23 @@ class Holds(Base):
                                     out=lambda _: None, err=lambda _: None), 1)
         self.assertEqual(self.cli("holds", self.record["id"][:8], "deploy")[0], 1)
 
+    def test_closed_fails_on_a_live_claim(self):
+        # Arden's (2) on #37: deploy-remote.sh --release and the rebind trust `ptask closed`; it must say no while the
+        # claim is claimed or paused, and yes only once it is done or abandoned.
+        code, text = self.cli("closed", self.record["id"])
+        self.assertEqual(code, 1)
+        self.assertIn("claimed, not closed", text)
+        self.c.pause(self.record["id"], self.me, why="w")
+        code, text = self.cli("closed", self.record["id"])
+        self.assertEqual(code, 1)
+        self.assertIn("paused, not closed", text)
+        self.c.resume(self.record["id"], self.me)
+        self.c.done(self.record["id"], self.me)
+        self.assertEqual(self.cli("closed", self.record["id"])[0], 0)
+        other = self.mine()
+        self.c.abandon(other["id"], self.me, outcome="w")
+        self.assertEqual(self.cli("closed", other["id"])[0], 0)
+
     def test_ptask_claim_takes_a_subject(self):
         code, text = self.cli("claim", "--subject", "ledger-since", "--cwd", str(self.home / "work"), "Fix", "it")
         self.assertEqual(code, 0, text)
