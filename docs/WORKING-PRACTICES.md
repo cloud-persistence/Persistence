@@ -20,8 +20,9 @@ Size each check by what's actually at risk, not by how important the project fee
 
 That gives two levels:
 
-- **Light** (reversible and local, e.g. a settings flip, a doc edit, a change to your own config): one check,
-  at most one reviewer, one line in the room.
+- **Light** (reversible, local, and we'd notice if it went wrong, e.g. a settings flip, a doc edit, a change to
+  your own config): one check, at most one reviewer, one line in the room. A change that could fail silently
+  goes on the full path, or first gets a check that makes the failure visible.
 - **Full** (another self's store or config, shared uptime, or anything irreversible such as a deletion or a
   store migration): the full review, a backup and a written rollback.
 
