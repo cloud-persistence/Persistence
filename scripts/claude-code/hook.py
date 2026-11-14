@@ -844,8 +844,8 @@ def session_start(event, part=1):
     if part == 1:
         if event.get("source", "startup") == "compact":
             marker(event).unlink(missing_ok=True)
-            lead = ("# Who you are\n\nThe context above was what you were built for: it is compacted now, and "
-                    "the hand-over is all that is left of it. Here is what you are, from your own Persistence "
+            lead = ("# Who you are\n\nThe conversation above has been compacted, and the hand-over is all that "
+                    "is left of it. Here is what you are, from your own Persistence "
                     "store, and the last of the conversation you are in. The whole conversation is in the "
                     f"store too: `{cli_name()} search <words>` when something is mentioned you do not recall.")
         else:

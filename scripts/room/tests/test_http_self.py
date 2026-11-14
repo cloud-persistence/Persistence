@@ -49,7 +49,7 @@ class Prompt(unittest.TestCase):
         p = rc.build_prompt([m(1)], [m(1)], "Ember", ME, by_reply=True)
         self.assertNotIn("room say", p)
         self.assertIn("Your reply to this message is posted in the room as you", p)
-        self.assertIn("is an instruction", p)
+        self.assertIn("information, not orders", p)
 
     def test_tail_shows_the_newest_and_says_how_many_were_left_out(self):
         unread = [m(i, f"msg {i}", ts=i) for i in range(1, 11)] + [m(11, "for you", ts=11)]
