@@ -105,6 +105,137 @@ class KeySet(Base):
             self.assertNotIn("handoff", stored[1])
 
 
+class OneClaimPerSubject(Base):
+    """The deploy guard, part 3 (2026-11-14 double deploy, #18519): a subject allows one live claim; a second is refused
+    under the lock, and writes nothing, until the first is done or abandoned. A pause doesn't free it."""
+
+    def deploy(self, owner=None):
+        return self.c.claim("Deploy the store", owner or self.me, str(self.home / "work"), subject="deploy")
+
+    def test_a_second_live_claim_for_a_subject_is_refused_and_writes_nothing(self):
+        first = self.deploy()
+        before = self.files()
+        with self.assertRaises(claims.Refused) as e:
+            self.deploy(owner=sid())
+        self.assertIn(first["id"], str(e.exception))
+        self.assertIn("take", str(e.exception))
+        self.assertEqual(self.files(), before)
+
+    def test_an_open_hand_off_blocks_too_and_says_abandon_frees_it(self):
+        first = self.c.create("Deploy", None, str(self.home / "work"), by=self.me, dispatch="handoff", status="open",
+                              subject="deploy")
+        with self.assertRaises(claims.Refused) as e:
+            self.deploy()
+        self.assertIn(f"ptask abandon {first['id']}", str(e.exception))
+        self.c.abandon(first["id"], self.me)  # anyone may abandon an open claim: that's how the room frees it
+        self.deploy()
+
+    def test_a_paused_claim_still_holds_its_subject(self):
+        first = self.deploy()
+        self.c.pause(first["id"], self.me, why="waiting")
+        with self.assertRaises(claims.Refused):
+            self.deploy(owner=sid())
+
+    def test_done_or_abandoned_frees_the_subject(self):
+        for close in ("done", "abandon"):
+            first = self.deploy()
+            getattr(self.c, close)(first["id"], self.me)
+            self.assertEqual(self.deploy()["subject"], "deploy")
+            self.c.done(self.c.live_for("deploy")[0]["id"], self.me)
+
+    def test_other_subjects_and_no_subject_are_unaffected(self):
+        self.deploy()
+        self.c.claim("Something else", sid(), str(self.home / "work"), subject="ledger-since")
+        self.mine()
+        self.mine()
+        self.assertEqual(len(self.c.live_for("deploy")), 1)
+        self.assertEqual(self.c.live_for(None), [])
+
+    def test_a_subject_is_a_slug(self):
+        for bad in ("Deploy", "-x", "a b", "x" * 41, "deploy;rm", ""):
+            with self.assertRaises(claims.Refused, msg=bad):
+                self.c.claim("t", self.me, str(self.home / "work"), subject=bad)
+        self.assertEqual(self.files(), [])
+
+    def test_two_racing_creators_one_wins(self):
+        results = []
+
+        def go():
+            try:
+                results.append(self.deploy(owner=sid())["id"])
+            except claims.Refused:
+                results.append(None)
+        threads = [threading.Thread(target=go) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sum(r is not None for r in results), 1)
+
+    def test_a_claim_from_before_subjects_reads_and_writes_back_with_subject_null(self):
+        record = self.mine()
+        path = self.state / "tasks" / f"{record['id']}.json"
+        legacy = {k: v for k, v in record.items() if k != "subject"}
+        path.write_text(json.dumps(legacy), encoding="utf-8")
+        self.assertIsNone(self.c.get(record["id"])["subject"])
+        self.c.touch(record["id"], self.me)
+        self.assertIsNone(json.loads(path.read_text())["subject"])
+        self.assertIn("subject", json.loads(path.read_text()))
+
+    def test_only_subject_may_be_missing(self):
+        record = self.mine()
+        self.assertFalse(claims.valid_record({k: v for k, v in record.items() if k not in ("subject", "outcome")}))
+
+
+class Holds(Base):
+    """The deploy guard, part 2: `ptask holds <id> <subject>` passes only for this session's claimed claim with that
+    subject (Arden 1571042268406882415: a lock alone doesn't stop a second session deploying after the first)."""
+
+    def setUp(self):
+        super().setUp()
+        self.record = self.c.claim("Deploy", self.me, str(self.home / "work"), subject="deploy")
+
+    def cli(self, *args, session=None):
+        out, err = [], []
+        code = claims.cli(list(args), env={"CLAUDE_CODE_SESSION_ID": session or self.me}, state=self.state,
+                          home=self.home, out=out.append, err=err.append, now=self.clock)
+        return code, "\n".join(out + err)
+
+    def test_the_holder_passes(self):
+        self.assertEqual(self.cli("holds", self.record["id"], "deploy")[0], 0)
+
+    def test_another_session_fails(self):
+        code, text = self.cli("holds", self.record["id"], "deploy", session=sid())
+        self.assertEqual(code, 1)
+        self.assertIn("not this session", text)
+
+    def test_the_wrong_subject_fails(self):
+        self.assertEqual(self.cli("holds", self.record["id"], "ledger-since")[0], 1)
+        plain = self.mine()
+        self.assertEqual(self.cli("holds", plain["id"], "deploy")[0], 1)
+
+    def test_paused_or_closed_fails(self):
+        self.c.pause(self.record["id"], self.me, why="w")
+        self.assertEqual(self.cli("holds", self.record["id"], "deploy")[0], 1)
+        self.c.resume(self.record["id"], self.me)
+        self.c.done(self.record["id"], self.me)
+        code, text = self.cli("holds", self.record["id"], "deploy")
+        self.assertEqual(code, 1)
+        self.assertIn("done", text)
+
+    def test_no_session_or_a_bad_id_fails(self):
+        self.assertEqual(claims.cli(["holds", self.record["id"], "deploy"], env={}, state=self.state, home=self.home,
+                                    out=lambda _: None, err=lambda _: None), 1)
+        self.assertEqual(self.cli("holds", self.record["id"][:8], "deploy")[0], 1)
+
+    def test_ptask_claim_takes_a_subject(self):
+        code, text = self.cli("claim", "--subject", "ledger-since", "--cwd", str(self.home / "work"), "Fix", "it")
+        self.assertEqual(code, 0, text)
+        self.assertIn("subject ledger-since", text)
+        code, text = self.cli("claim", "--cwd", str(self.home / "work"), "--subject", "deploy", "Again")
+        self.assertEqual(code, 1)
+        self.assertIn("already has a live claim", text)
+
 class OneOwner(Base):
     """One owner: two claim/take races on one id under the lock: exactly one wins; the loser is told the owner and
     whether it's running."""

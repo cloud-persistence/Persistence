@@ -19,6 +19,7 @@ Standard library only, Linux for the descriptor binding."""
 import ctypes
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -32,8 +33,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hook  # noqa: E402  TASK_FIELDS stays the single list of hand-off keys
 
 TASK_FIELDS = hook.TASK_FIELDS
-CLAIM_FIELDS = ("id", "dispatch", "status", "cwd", "created", "updated", "pause_until", "nudged", "reported", "history", "outcome")
+CLAIM_FIELDS = ("id", "dispatch", "status", "cwd", "created", "updated", "pause_until", "nudged", "reported", "history", "outcome",
+                "subject")
 KEYS = set(TASK_FIELDS) | set(CLAIM_FIELDS)
+# `subject` came after the first claims (the deploy guard, after the 2026-11-14 double deploy): a file written before
+# it has every other key and no subject, and reads as subject None. No other key may be missing.
+LEGACY_KEYS = KEYS - {"subject"}
+# A subject names the job a claim is for, so two claims can't be live for one job: at most one claim per subject is
+# not done or abandoned. A short slug, never free text: the deploy checks it by equality ("deploy").
+SUBJECT = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 ENTRY_FIELDS = ("at", "action", "from_status", "to_status", "from_owner", "to_owner", "by", "firing")
 STATUSES = ("open", "claimed", "paused", "done", "abandoned")
 TERMINAL = ("done", "abandoned")
@@ -98,8 +106,15 @@ def pending_for(record, items):
 
 
 def valid_record(record):
-    """Valid by key set, not order."""
-    return isinstance(record, dict) and set(record) == KEYS
+    """Valid by key set, not order. A record from before `subject` is valid without it (LEGACY_KEYS)."""
+    return isinstance(record, dict) and set(record) in (KEYS, LEGACY_KEYS)
+
+
+def valid_subject(subject):
+    """None (no subject) or a slug: lower-case letters, digits and hyphens, at most 40, not starting with a hyphen."""
+    if subject is not None and not (isinstance(subject, str) and SUBJECT.fullmatch(subject)):
+        raise Refused(f"{subject!r} is not a subject: lower-case letters, digits and hyphens, at most 40")
+    return subject
 
 
 def enabled(home=None):
@@ -264,6 +279,7 @@ class Claims:
             raise Refused(f"claim file {path.name} can't be read: {e}")
         if not valid_record(record):
             raise Refused(f"claim file {path.name} doesn't have exactly the claim keys")
+        record.setdefault("subject", None)  # a claim from before subjects; written back with subject null
         return record
 
     def all(self):
@@ -370,8 +386,12 @@ class Claims:
         os.close(self.open_cwd(real))
         return real
 
+    def live_for(self, subject):
+        """The claims for `subject` that are not done or abandoned (paused counts: a pause expires back to claimed)."""
+        return [r for r in self.all() if subject and r["subject"] == subject and r["status"] not in TERMINAL]
+
     def create(self, task, owner, cwd, by, dispatch="none", status="claimed", origin_session=None,
-               room_channel=None, room_from=None, room_upto=None, base=None):
+               room_channel=None, room_from=None, room_upto=None, base=None, subject=None):
         if dispatch not in DISPATCHES or status not in ("open", "claimed"):
             raise Refused(f"a claim is created open or claimed, dispatch handoff or none")
         if status == "claimed" and not full_id(owner):
@@ -379,22 +399,49 @@ class Claims:
         if status == "open" and owner is not None:
             raise Refused("an open claim has no owner")
         self._actor(by, ("harness",))
+        valid_subject(subject)
         record = dict.fromkeys(TASK_FIELDS)
         record.update(task=str(task), origin_session=origin_session, room_channel=room_channel, room_from=room_from,
                       room_upto=room_upto, owner=None)
         record.update(id=str(uuid.uuid4()), dispatch=dispatch, status=None, cwd=self.canonical_cwd(cwd, base),
-                      created=self.stamp(), updated=None, pause_until=None, nudged=None, reported=None, history=[], outcome=None)
+                      created=self.stamp(), updated=None, pause_until=None, nudged=None, reported=None, history=[], outcome=None,
+                      subject=subject)
         with self.lock("tasks"):
             self._settle_locked()
+            # One live claim per subject, checked under the lock so two creators can't both pass (the 2026-11-14 double
+            # deploy: a second hand-off for the deploy was made while the first claim was live). The old claim must be
+            # closed, not paused: a pause expires back to claimed, and its session can resume.
+            for live in self.live_for(subject):
+                how = (f"`ptask abandon {live['id']}` closes it, since it is open" if live["status"] == "open" else
+                       f"its owner closes it with `ptask done` or `ptask abandon`, or, if the owner has stopped, "
+                       f"`ptask take {live['id']}` then abandon")
+                raise Refused(f"subject {subject!r} already has a live claim: {self._held_by(live)}. One claim per "
+                              f"subject until it is done or abandoned; {how}")
             self._append(record, "claim" if status == "claimed" else "create", status, by, to_owner=owner if status == "claimed" else None)
             self._write(record)
         return record
 
-    def claim(self, task, session, cwd, base=None):
+    def claim(self, task, session, cwd, base=None, subject=None):
         """`ptask claim "<task>"`: always a new record, claimed, dispatch none, owned by the calling session."""
         if not full_id(session):
             raise Refused("ptask claim needs this session's full id (CLAUDE_CODE_SESSION_ID)")
-        return self.create(task, session, cwd, by=session, origin_session=session, base=base)
+        return self.create(task, session, cwd, by=session, origin_session=session, base=base, subject=subject)
+
+    def holds(self, claim_id, session, subject):
+        """`ptask holds <id> <subject>`, the deploy's check that its caller holds the live claim for the job: the claim
+        is claimed (not open, paused or closed), owned by exactly this session, and has exactly this subject. Returns
+        the record, or Refused saying which of the three failed. Reads only."""
+        valid_subject(subject)
+        if not full_id(session):
+            raise Refused("no session id to check against (CLAUDE_CODE_SESSION_ID)")
+        record = self.get(claim_id)
+        if record["subject"] != subject:
+            raise Refused(f"claim {claim_id} has subject {record['subject']!r}, not {subject!r}")
+        if record["status"] != "claimed":
+            raise Refused(f"claim {claim_id} is {record['status']}, not claimed")
+        if record["owner"] != session:
+            raise Refused(f"claim {claim_id} is held by {record['owner']}, not this session {session}")
+        return record
 
     # Transitions (section 1). Anything else is refused, under the lock.
     def claim_open(self, claim_id, owner, by="harness", firing=None):
@@ -600,13 +647,16 @@ class Claims:
 
 
 # ptask: the session's own command. `claim` and `take` are refused in a room session (section 2.2).
-USAGE = """ptask claim [--cwd <dir>] "<task>"     a new claim, owned by this session (not from a room session: use pwake)
+USAGE = """ptask claim [--cwd <dir>] [--subject <slug>] "<task>"
+                                         a new claim, owned by this session (not from a room session: use pwake);
+                                         a subject allows one live claim per job (deploy: --subject deploy)
 ptask list                               this self's claims not yet closed
 ptask show <id>                          one claim, whole
 ptask pause <id> [--until <UTC time>] "<why>"
 ptask resume <id> | touch <id>
 ptask done <id> ["<outcome>"] | abandon <id> ["<outcome>"]
-ptask take <id>                          take a claim whose owner isn't running and has no wake pending"""
+ptask take <id>                          take a claim whose owner isn't running and has no wake pending
+ptask holds <id> <subject>               exit 0 only if this session holds claim <id>, claimed, with that subject"""
 
 
 def _describe(record, now):
@@ -634,14 +684,21 @@ def cli(args, env=None, state=None, home=None, cwd=None, out=print, err=None, no
                           f"starts a working session that the harness claims for")
         if verb == "claim":
             here = cwd or os.getcwd()
-            where = here
-            if rest[:1] == ["--cwd"] and len(rest) > 1:
-                where, rest = rest[1], rest[2:]
+            where, subject = here, None
+            while rest[:1] in (["--cwd"], ["--subject"]) and len(rest) > 1:
+                if rest[0] == "--cwd":
+                    where = rest[1]
+                else:
+                    subject = rest[1]
+                rest = rest[2:]
             task = " ".join(rest).strip()
             if not task:
                 raise Refused('ptask claim needs the task: ptask claim "<task>"')
-            record = c.claim(task, session, where, base=here)
-            out(f"claimed {record['id']} in {record['cwd']}")
+            record = c.claim(task, session, where, base=here, subject=subject)
+            out(f"claimed {record['id']} in {record['cwd']}" + (f", subject {subject}" if subject else ""))
+        elif verb == "holds" and len(rest) == 2:
+            record = c.holds(rest[0], session, rest[1])
+            out(f"this session holds {record['id']}, subject {record['subject']}")
         elif verb == "list":
             moment = c.now()
             lines = [_describe(r, moment) for r in c.all() if r["status"] not in TERMINAL]

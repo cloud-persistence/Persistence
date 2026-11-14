@@ -403,8 +403,61 @@ class Docs(unittest.TestCase):
         self.assertIn("persistence-store", self.STEPS)  # step 1 restarts the stores: not inert
 
 
-class DeployRemote(unittest.TestCase):
+class FakeHost:
+    """deploy-remote.sh run against a fake host, with a deploy claim held by this session."""
     TEXT = (REPO / "deploy-remote.sh").read_text()
+
+    def fake_host(self):
+        # The script itself, run against fakes: ssh runs its remote command locally with /tmp, /home and /opt/persistence
+        # moved into a scratch dir; sudo drops the root-only chown/chmod/systemctl; dotnet, scp and sleep are stand-ins.
+        # The user is whoever runs the test, so `install -o` needs no root. Nothing outside the scratch dir is touched.
+        # The caller holds a deploy claim in a scratch state dir (PERSISTENCE_STATE_DIR), as this session.
+        import pwd, os, uuid
+        sys.path.insert(0, str(REPO))
+        import claims
+        self.user = user = pwd.getpwuid(os.geteuid()).pw_name
+        self.w = w = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, w)
+        bins, self.tmp, self.dest = w / "bin", w / "tmp", w / "home" / user / ".claude" / "persistence"
+        self.opt, self.state = w / "opt" / "persistence", w / "state"
+        for d in (bins, self.tmp, self.dest, self.opt / "store", self.state):
+            d.mkdir(parents=True)
+        fakes = {
+            "dotnet": 'while [ "$1" != "-o" ]; do shift; done; mkdir -p "$2"; echo x > "$2/persistence-store"',
+            "scp": (f'shift; a=("$@"); d="${{a[-1]#*:}}"; d=${{d//\\/tmp\\//{self.tmp}/}}; unset "a[-1]"; '
+                    f'cp "${{a[@]}}" "$d"'),
+            "ssh": (f'c="$2"; c=${{c//\\/tmp\\//{self.tmp}/}}; c=${{c//\\/home\\//{w}/home/}}; '
+                    f'c=${{c//\\/opt\\/persistence\\//{self.opt}/}}; exec bash -c "$c"'),
+            "sudo": 'case "$1" in chown|chmod|systemctl) exit 0;; esac; exec "$@"',
+            "systemctl": "exit 0", "sleep": "exit 0"}
+        for name, body in fakes.items():
+            (bins / name).write_text(f"#!/bin/bash\n{body}\n")
+            (bins / name).chmod(0o755)
+        py = re.search(r"^py=\(([^)]*)\)", self.TEXT, re.M).group(1).split()
+        for f in py:
+            shutil.copy(REPO / f, self.dest / f)
+        self.me = str(uuid.uuid4())
+        self.claims = claims.Claims(self.state, home=w)
+        (w / "work").mkdir()
+        self.claim = self.claims.claim("Deploy", self.me, str(w / "work"), subject="deploy")["id"]
+        self.env = dict(os.environ, PATH=f"{bins}:{os.environ['PATH']}", PERSISTENCE_STATE_DIR=str(self.state),
+                        CLAUDE_CODE_SESSION_ID=self.me)
+
+    def deploy(self, *args, check=True, env=None):
+        args = args or ("--claim", self.claim, "fakehost", self.user)
+        run = subprocess.run(["bash", str(REPO / "deploy-remote.sh"), *args], env=env or self.env, capture_output=True,
+                             text=True)
+        if check:
+            self.assertEqual(run.returncode, 0, run.stderr)
+        return run
+
+    def untouched(self):
+        self.assertEqual((self.dest / "heartbeat.py").read_text(), "# a local edit\n")
+        self.assertFalse((self.opt / "store" / "persistence-store").exists())
+        self.assertFalse((self.dest / "previous").exists())
+
+
+class DeployRemote(FakeHost, unittest.TestCase):
 
     def test_parses(self):
         subprocess.run(["bash", "-n", str(REPO / "deploy-remote.sh")], check=True)
@@ -417,45 +470,67 @@ class DeployRemote(unittest.TestCase):
         self.assertIn("previous/", self.TEXT)
 
     def test_run_keeps_differing_copies(self):
-        # The script itself, run against fakes: ssh runs its remote command locally with /tmp, /home and the store dir
-        # moved into a scratch dir; sudo drops the root-only chown/chmod/systemctl; dotnet, scp and sleep are stand-ins.
-        # The user is whoever runs the test, so `install -o` needs no root. Nothing outside the scratch dir is touched.
-        import pwd, os
-        user = pwd.getpwuid(os.geteuid()).pw_name
-        w = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, w)
-        bins, tmp, dest = w / "bin", w / "tmp", w / "home" / user / ".claude" / "persistence"
-        for d in (bins, tmp, dest, w / "opt"):
-            d.mkdir(parents=True)
-        fakes = {
-            "dotnet": 'while [ "$1" != "-o" ]; do shift; done; mkdir -p "$2"; echo x > "$2/persistence-store"',
-            "scp": f'shift; a=("$@"); unset "a[-1]"; cp "${{a[@]}}" {tmp}/',
-            "ssh": (f'c="$2"; c=${{c//\\/tmp\\//{tmp}/}}; c=${{c//\\/home\\//{w}/home/}}; '
-                    f'c=${{c//\\/opt\\/persistence\\/store/{w}/opt}}; exec bash -c "$c"'),
-            "sudo": 'case "$1" in chown|chmod|systemctl) exit 0;; esac; exec "$@"',
-            "systemctl": "exit 0", "sleep": "exit 0"}
-        for name, body in fakes.items():
-            (bins / name).write_text(f"#!/bin/bash\n{body}\n")
-            (bins / name).chmod(0o755)
-        py = re.search(r"^py=\(([^)]*)\)", self.TEXT, re.M).group(1).split()
-        for f in py:
-            shutil.copy(REPO / f, dest / f)
-        (dest / "heartbeat.py").write_text("# a local edit\n")
-        env = dict(os.environ, PATH=f"{bins}:{os.environ['PATH']}")
-
-        def deploy():
-            return subprocess.run(["bash", str(REPO / "deploy-remote.sh"), "fakehost", user], env=env, check=True,
-                                  capture_output=True, text=True).stdout
-        out = deploy()
-        kept = list((dest / "previous").glob("*/heartbeat.py"))
+        self.fake_host()
+        (self.dest / "heartbeat.py").write_text("# a local edit\n")
+        out = self.deploy().stdout
+        kept = list((self.dest / "previous").glob("*/heartbeat.py"))
         self.assertEqual(len(kept), 1, out)
         self.assertEqual(kept[0].read_text(), "# a local edit\n")
         self.assertEqual([p.name for p in kept[0].parent.iterdir()], ["heartbeat.py"])  # identical files aren't kept
         self.assertIn("replaced heartbeat.py", out)
-        self.assertEqual((dest / "heartbeat.py").read_bytes(), (REPO / "heartbeat.py").read_bytes())
-        self.assertIn("no hook file changed", deploy())
-        self.assertEqual(len(list((dest / "previous").iterdir())), 1)
+        self.assertEqual((self.dest / "heartbeat.py").read_bytes(), (REPO / "heartbeat.py").read_bytes())
+        self.assertIn("no hook file changed", self.deploy().stdout)
+        self.assertEqual(len(list((self.dest / "previous").iterdir())), 1)
+        self.assertEqual(list(self.tmp.iterdir()), [], "each run's staging directory is removed")
+        self.assertIn(f"claim {self.claim}, session {self.me}", (self.opt / ".deploy.holder").read_text())
 
+
+class DeployGuard(FakeHost, unittest.TestCase):
+    """The deploy guard, parts 1 and 2 (2026-11-14 double deploy, #18519): no run without the caller holding the live
+    deploy claim, and no run while another holds the host's lock. A refused run changes nothing on the host."""
+
+    def setUp(self):
+        self.fake_host()
+        (self.dest / "heartbeat.py").write_text("# a local edit\n")
+
+    def test_no_claim_is_refused(self):
+        run = self.deploy("fakehost", self.user, check=False)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("--claim", run.stderr)
+        self.untouched()
+
+    def test_a_claim_this_session_doesnt_hold_is_refused(self):
+        import uuid
+        run = self.deploy(check=False, env=dict(self.env, CLAUDE_CODE_SESSION_ID=str(uuid.uuid4())))
+        self.assertEqual(run.returncode, 3, run.stderr)
+        self.assertIn("not this session", run.stderr)
+        self.untouched()
+
+    def test_a_finished_deploy_claim_is_refused(self):
+        # Arden's case: the first deployer finished; a second session's stale claim, or the closed one, can't deploy.
+        self.claims.done(self.claim, self.me)
+        run = self.deploy(check=False)
+        self.assertEqual(run.returncode, 3)
+        self.assertIn("done", run.stderr)
+        self.untouched()
+
+    def test_a_claim_with_another_subject_is_refused(self):
+        other = self.claims.claim("Not a deploy", self.me, str(self.w / "work"))["id"]
+        self.assertEqual(self.deploy("--claim", other, "fakehost", self.user, check=False).returncode, 3)
+        self.untouched()
+
+    def test_a_held_lock_is_refused_and_names_the_holder(self):
+        import fcntl
+        (self.opt / ".deploy.lock").touch()
+        (self.opt / ".deploy.holder").write_text("claim 728d3911, session ea465313\n")
+        with open(self.opt / ".deploy.lock") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            run = self.deploy(check=False)
+        self.assertEqual(run.returncode, 4, run.stderr)
+        self.assertIn("claim 728d3911", run.stderr)
+        self.untouched()
+        self.assertEqual(list(self.tmp.iterdir()), [], "the refused run's staging directory is removed")
+        self.deploy()  # released: the same claim deploys
 
 if __name__ == "__main__":
     unittest.main()

@@ -2200,7 +2200,7 @@ def set_handoff(wake, home=None):
         items = queue_locked()
         claim = c.create(wake["reason"], owner=None, cwd=wake["cwd"], by=origin, dispatch="handoff", status="open",
                          origin_session=origin, room_channel=record.get("room_channel"),
-                         room_from=record.get("room_from"), room_upto=record.get("room_upto"))
+                         room_from=record.get("room_from"), room_upto=record.get("room_upto"), subject=wake.get("subject"))
         item = {"id": str(uuid.uuid4()), "reason": wake["reason"], "set": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "cwd": claim["cwd"], "session": wake["session"], "work": True, "claim": claim["id"],
                 "at": datetime.now().timestamp() + 60 * float(wake.get("in", 30))}
@@ -2484,12 +2484,17 @@ def note_line(event):
 
 
 def wake_request(argv):
-    """`wake <minutes|pid:N> [--from <message id>] <reason>` as the wake it sets. Set from a room session, it starts
-    a separate working session and carries a task record pointing at the room conversation behind it."""
+    """`wake <minutes|pid:N> [--from <message id>] [--subject <slug>] <reason>` as the wake it sets. Set from a room
+    session, it starts a separate working session and carries a task record pointing at the room conversation behind
+    it; --subject makes its claim the one live claim for that job (claims.py, `subject`)."""
     when, rest = argv[0], list(argv[1:])
-    start = None
-    if rest[:1] == ["--from"] and len(rest) > 1:
-        start, rest = rest[1], rest[2:]
+    start = subject = None
+    while rest[:1] in (["--from"], ["--subject"]) and len(rest) > 1:
+        if rest[0] == "--from":
+            start = rest[1]
+        else:
+            subject = rest[1]
+        rest = rest[2:]
     wake = {"pid": when[4:]} if when.startswith("pid:") else {"in": float(when.rstrip("m"))}
     wake["reason"] = " ".join(rest)
     wake["session"] = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -2505,8 +2510,12 @@ def wake_request(argv):
         work = Path.home() / "work"
         wake["cwd"] = str(work if work.is_dir() else Path.home())
         wake["handoff"] = task_record(wake["reason"], origin, wake["session"], channel, start)
+        wake["subject"] = subject
     elif start:
         raise ValueError("--from names a room message, so it is for a wake set from a room session")
+    elif subject:
+        raise ValueError("--subject names the job of a hand-off, so it is for a wake set from a room session; a working "
+                         "session claims with `ptask claim --subject`")
     return wake
 
 

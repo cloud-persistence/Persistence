@@ -86,10 +86,10 @@ class Base(unittest.TestCase):
             p.stop()
         self.tmp.cleanup()
 
-    def pwake(self, task="Build the spawn claim", minutes="0"):
+    def pwake(self, task="Build the spawn claim", minutes="0", flags=()):
         with mock.patch.dict(os.environ, {"PERSISTENCE_ROOM_CHANNEL": ROOM, "CLAUDE_CODE_SESSION_ID": self.room}), \
                 mock.patch.object(hook.Path, "home", return_value=self.home):
-            wake = hook.wake_request([minutes, *task.split(" ")])
+            wake = hook.wake_request([minutes, *flags, *task.split(" ")])
         return hook.set_handoff(wake, home=self.home)
 
     def run_due(self):
@@ -143,6 +143,38 @@ class Pwake(Base):
         self.assertEqual(record["cwd"], str(self.home / "real-work"))
         self.assertEqual(item["cwd"], str(self.home / "real-work"))
 
+
+class HandOffSubject(Base):
+    """The deploy guard, part 3: a room hand-off with --subject is refused while a claim for that subject is live, and
+    writes neither a claim nor a queue item; the room must close the old claim first (the 05:20Z second deploy claim)."""
+
+    def test_a_second_hand_off_for_a_live_subject_is_refused_and_writes_nothing(self):
+        first, _ = self.pwake("Stage 1 deploy at b3be589", flags=("--subject", "deploy"))
+        self.assertEqual(first["subject"], "deploy")
+        queue, files = self.queue(), sorted((self.state / "tasks").glob("*.json"))
+        with self.assertRaises(claims.Refused) as e:
+            self.pwake("Stage 1 deploy: notice 05:55Z", flags=("--subject", "deploy"))
+        self.assertIn(first["id"], str(e.exception))
+        self.assertEqual(self.queue(), queue)
+        self.assertEqual(sorted((self.state / "tasks").glob("*.json")), files)
+
+    def test_after_the_old_claim_is_abandoned_the_hand_off_goes_through(self):
+        first, _ = self.pwake("Deploy", flags=("--subject", "deploy"))
+        self.c.abandon(first["id"], self.room)
+        second, item = self.pwake("Deploy", flags=("--subject", "deploy"))
+        self.assertEqual((second["subject"], item["claim"]), ("deploy", second["id"]))
+
+    def test_the_claim_run_due_takes_keeps_the_subject_so_it_still_blocks(self):
+        first, _ = self.pwake("Deploy", flags=("--subject", "deploy"))
+        self.run_due()
+        self.assertEqual(self.c.get(first["id"])["status"], "claimed")
+        with self.assertRaises(claims.Refused):
+            self.pwake("Deploy again", flags=("--subject", "deploy"))
+
+    def test_subject_is_for_a_room_hand_off_only(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": self.room}):
+            with self.assertRaises(ValueError):
+                hook.wake_request(["5", "--subject", "deploy", "carry", "on"])
 
 class SpawnClaim(Base):
     """Claim at spawn: a hand-off worker that never calls ptask leaves the claim claimed by its pre-minted id, and the
