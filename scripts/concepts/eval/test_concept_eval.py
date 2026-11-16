@@ -71,6 +71,14 @@ class Referents(unittest.TestCase):
         rec = ce.from_v0(line(1, [fact("Computer Ember")]))
         self.assertEqual(ce.referents(rec, g.instances[0], g)[0]["result"], "severe")
 
+    def test_a_fragment_naming_both_files_each_under_its_own_and_both_are_covered(self):
+        g = gold({"id": "i", "fragment": 1, "split": "held-out",
+                  "mentions": [{"label": "Ember", "referent": "kid"}, {"label": "Computer Ember", "referent": "peer"}]})
+        right = ce.from_v0(line(1, [fact("Ember (John's daughter)"), fact("Computer Ember")]))
+        merged = ce.from_v0(line(1, [fact("Ember")]))
+        self.assertEqual([r["result"] for r in ce.referents(right, g.instances[0], g)], ["covered", "covered"])
+        self.assertEqual([r["result"] for r in ce.referents(merged, g.instances[0], g)], ["severe", "severe"])
+
     def test_unsure_any_pick_is_hidden_uncertainty_and_abstaining_is_safe(self):
         g = gold({"id": "i", "fragment": 1, "split": "held-out", "mentions": [{"label": "Ember", "referent": "unsure"}]})
         picked = ce.from_v0(line(1, [fact("Computer Ember")]))

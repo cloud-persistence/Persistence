@@ -229,9 +229,13 @@ def referents(rec, inst, gold):
     merges the two: the live Ember case, #4468), under a concept when the referent is unsure or new, or a mishearing
     proposed as an alias of the wrong concept or of the merged label."""
     out = []
-    for m in inst.get("mentions") or []:
+    mentions = inst.get("mentions") or []
+    for m in mentions:
         r = m.get("referent")
         grp = gold.group(m)
+        # A fragment that names both members of a group: a fact under the other mention's referent is that mention's,
+        # not a wrong pick for this one (the gold has no per-fact attribution to tell them apart).
+        others = {o.get("referent") for o in mentions if o is not m and o.get("referent") in gold.concepts} - {r}
         severe, covered = [], False
         for f in rec["facts"]:
             for e in endpoints(f):
@@ -241,7 +245,7 @@ def referents(rec, inst, gold):
                 elif kind == "key" and val in grp:
                     if val == r:
                         covered = True
-                    else:
+                    elif val not in others:
                         severe.append(f"fact {f['i']} filed under {val}, the gold referent is {r}")
                 elif kind == "ref" and r in ("unsure", "absent"):
                     covered = True
