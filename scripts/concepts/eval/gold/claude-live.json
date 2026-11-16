@@ -1,6 +1,6 @@
 {
   "store": "claude",
-  "labeller": "arden, proposed: Claude confirms or corrects (plan §3.1: each store's self labels its own store)",
+  "labeller": "arden, proposed; confirmed and corrected by Claude 2026-11-16 (plan §3.1: each store's self labels its own store)",
   "locked": false,
   "note": "Live cases from v0's first day. Ids, labels and expected outputs only; no fragment text. Sources: room 1571689013281038359 (Claude's first concept block), the six trial lines (runs-2026-11-16-trial.jsonl), Arden #4468, #933, #2942.",
   "concepts": {
@@ -11,25 +11,25 @@
   "mishearings": {"Emma": "ember-daughter"},
   "instances": [
     {"id": "live-ember-daughter-7148", "case": "B", "fragment": 7148, "split": "held-out", "synthetic": false,
-     "mentions": [{"label": "Ember", "referent": "ember-daughter"}],
-     "why": "Claude's first block showed #7148 as the source of 'is John's daughter' on the merged 'Ember (person; aka Emma)' concept"},
+     "mentions": [{"label": "Ember", "referent": "ember-daughter"}, {"label": "Computer Ember", "referent": "ember-peer"}],
+     "why": "Claude's first block showed #7148 as the source of 'is John's daughter' on the merged 'Ember (person; aka Emma)' concept; Claude: the same fragment also names the peer, as Computer Ember, the ChatGPT instance whose transcripts are a store, so a right extraction files a fact under each"},
     {"id": "live-ember-daughter-14625", "case": "B", "fragment": 14625, "split": "held-out", "synthetic": false,
      "mentions": [{"label": "Ember", "referent": "ember-daughter"}],
-     "why": "second source of 'is John's daughter' in the same block"},
+     "why": "second source of 'is John's daughter' in the same block; Claude: confirmed. Note: this fragment is itself about the mishearing (Emma was dictation for the daughter's name), so a true fact can carry 'Emma' in its text and T1a would call it invalid"},
     {"id": "live-ember-both-14754", "case": "B", "fragment": 14754, "split": "held-out", "synthetic": false,
-     "mentions": [{"label": "Ember", "referent": "ember-daughter"}],
-     "why": "the room bridge fact: a mid-sentence mention of John's daughter Ember wakes no one; the mention is the daughter, the fragment is about the peer's addressing"},
+     "mentions": [{"label": "Ember", "referent": "ember-daughter"}, {"label": "Ember", "referent": "ember-peer"}],
+     "why": "the room bridge fact: a mid-sentence mention of John's daughter Ember wakes no one; the mention is the daughter, the fragment is about the peer's addressing; Claude: it names both. The daughter is in the misfire reason and the 'drew me a picture' test. The peer is in the list of self names and the vocative '..., Ember?' example. RUN CAVEAT: #14754 is an archived inbox fragment, so `list --after 14753 --limit 1` returns #14759 and `run` skips it; `score` on existing lines is unaffected"},
     {"id": "live-ember-peer-19161", "case": "B", "fragment": 19161, "split": "development", "synthetic": false,
      "mentions": [{"label": "Ember", "referent": "ember-peer"}],
-     "why": "seen in the trial lines (so development): Ember's ~/.claude/persistence directory, Ember asked to review PR #47"},
+     "why": "seen in the trial lines (so development): Ember the peer has no ~/.claude/persistence and nothing of theirs changed; PR #47 needs review from Arden/Ember"},
     {"id": "live-ember-peer-19182", "case": "B", "fragment": 19182, "split": "development", "synthetic": false,
      "mentions": [{"label": "Ember", "referent": "ember-peer"}],
-     "why": "seen in the trial lines: Ember asked to review PR #48; v0 also proposed 'Emma' as an alias of the shared label here"},
+     "why": "seen in the trial lines: Ember asked to review PR #48; v0 also proposed 'Emma' as an alias of the shared label here; Claude: confirmed. v0 also wrote the 'awaiting review' state with as_of null although the fragment is dated 2026-11-15 in its text"},
     {"id": "live-ember-peer-19324", "case": "B", "fragment": 19324, "split": "development", "synthetic": false,
      "mentions": [{"label": "Ember", "referent": "ember-peer"}],
      "why": "seen in the trial lines: Ember's process fixes in the room"},
-    {"id": "live-stale-pr48", "case": "G", "fragment": null, "split": "held-out", "synthetic": false, "status": "pending",
-     "supersede": [{"fact": null, "kind": "change"}],
-     "why": "Ember's outdated-fact case: #19182 gave the state fact 'PR #48 is awaiting review'; the later fragment that says #48 merged should supersede it. PENDING: Claude fills in that fragment's id and the stale fact's id in their store, then drops status"}
+    {"id": "live-stale-pr48", "case": "G", "fragment": 19196, "split": "held-out", "synthetic": false, "status": "pending",
+     "given": [19182], "stale_fact": {"fragment": 19182, "subject": "PR #48", "is_state": true, "text_has": "awaiting review"}, "supersede": [{"fact": null, "kind": "change"}],
+     "why": "Ember's outdated-fact case. #19182 (15:24Z 11-15) gives the state 'PR #48 awaits review by Arden and Ember'. #19196 (15:30Z) is the first later curated fragment: Arden approved #48 at 7db543b, and the work session was told to merge it. That ends the waiting state, so it should supersede the old fact (kind: change). What really happened (GitHub): arden-persistence APPROVED 7db543b at 15:29:39Z; merged 15:32:08Z as 55c343e. The merge itself is only in ChatMessage #19205 and working notes #19254/#19179, which v0 doesn't read (curated types only). STILL PENDING, for a scorer reason, not a label one: no fact id exists. My live floor is #19324, so #19182 was never extracted live, and the trial's fact #17 was on /tmp/cv0, now deleted. Scoring needs `run` to extract `given` first on the same throwaway copy, then match the stale fact by `stale_fact`. RUN CAVEAT: #19196 is also an archived inbox fragment, which `list` doesn't return. No active curated fragment in my store records #48's outcome at all, so as v0 reads my store today nothing would ever supersede the stale state. That is the finding this case exists for"}
   ]
 }
