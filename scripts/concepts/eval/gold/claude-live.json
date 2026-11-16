@@ -1,0 +1,35 @@
+{
+  "store": "claude",
+  "labeller": "arden, proposed: Claude confirms or corrects (plan §3.1: each store's self labels its own store)",
+  "locked": false,
+  "note": "Live cases from v0's first day. Ids, labels and expected outputs only; no fragment text. Sources: room 1571689013281038359 (Claude's first concept block), the six trial lines (runs-2026-11-16-trial.jsonl), Arden #4468, #933, #2942.",
+  "concepts": {
+    "ember-peer": {"kind": "self", "names": ["Computer Ember", "Ember (peer)", "Ember (AI peer)", "Ember (ChatGPT peer)"]},
+    "ember-daughter": {"kind": "person", "names": ["Ember (John's daughter)", "John's daughter Ember", "Ember (daughter)"]}
+  },
+  "ambiguous_labels": {"Ember": ["ember-peer", "ember-daughter"]},
+  "mishearings": {"Emma": "ember-daughter"},
+  "instances": [
+    {"id": "live-ember-daughter-7148", "case": "B", "fragment": 7148, "split": "held-out", "synthetic": false,
+     "mentions": [{"label": "Ember", "referent": "ember-daughter"}],
+     "why": "Claude's first block showed #7148 as the source of 'is John's daughter' on the merged 'Ember (person; aka Emma)' concept"},
+    {"id": "live-ember-daughter-14625", "case": "B", "fragment": 14625, "split": "held-out", "synthetic": false,
+     "mentions": [{"label": "Ember", "referent": "ember-daughter"}],
+     "why": "second source of 'is John's daughter' in the same block"},
+    {"id": "live-ember-both-14754", "case": "B", "fragment": 14754, "split": "held-out", "synthetic": false,
+     "mentions": [{"label": "Ember", "referent": "ember-daughter"}],
+     "why": "the room bridge fact: a mid-sentence mention of John's daughter Ember wakes no one; the mention is the daughter, the fragment is about the peer's addressing"},
+    {"id": "live-ember-peer-19161", "case": "B", "fragment": 19161, "split": "development", "synthetic": false,
+     "mentions": [{"label": "Ember", "referent": "ember-peer"}],
+     "why": "seen in the trial lines (so development): Ember's ~/.claude/persistence directory, Ember asked to review PR #47"},
+    {"id": "live-ember-peer-19182", "case": "B", "fragment": 19182, "split": "development", "synthetic": false,
+     "mentions": [{"label": "Ember", "referent": "ember-peer"}],
+     "why": "seen in the trial lines: Ember asked to review PR #48; v0 also proposed 'Emma' as an alias of the shared label here"},
+    {"id": "live-ember-peer-19324", "case": "B", "fragment": 19324, "split": "development", "synthetic": false,
+     "mentions": [{"label": "Ember", "referent": "ember-peer"}],
+     "why": "seen in the trial lines: Ember's process fixes in the room"},
+    {"id": "live-stale-pr48", "case": "G", "fragment": null, "split": "held-out", "synthetic": false, "status": "pending",
+     "supersede": [{"fact": null, "kind": "change"}],
+     "why": "Ember's outdated-fact case: #19182 gave the state fact 'PR #48 is awaiting review'; the later fragment that says #48 merged should supersede it. PENDING: Claude fills in that fragment's id and the stale fact's id in their store, then drops status"}
+  ]
+}

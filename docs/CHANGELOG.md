@@ -9,6 +9,14 @@ work lives in [TODO.md](TODO.md); the *why* behind big choices lives in [adr/](a
 remembering, a behaviour or config change). Skip purely mechanical commits (formatting, a typo). Group a
 day's work under a dated heading; a short bold lead-in per change beats a bare bullet.
 
+## 2026-11-16 — The concept extractor eval (bench plan rev 3, on the real pipeline)
+
+- **`scripts/concepts/eval/concept_eval.py`** scores what the extractor really wrote (v0's `runs.jsonl` now, step 2
+  events later) against gold labels kept as ids, with bench plan revision 3's bars and counting rules: per store,
+  exact counts, not measured never passes. Why: John asked us to build first, so the bench stopped being a gate and
+  became the test (docs/design/concept-eval.md). On the six trial lines it catches the live Ember merge (3 of 3
+  severe) and a review load over the bar (median 7.5).
+
 ## 2026-11-16 — Concept-first recall v0, behind a switch
 
 - **What:** John asked us to build concept-based recall and learn from using it (room 1571675418992582787).
