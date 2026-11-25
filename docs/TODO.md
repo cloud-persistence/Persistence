@@ -474,6 +474,13 @@ strike an item when it lands (with the commit).
   `--propose` for the first week). See "As built" in the design.
 - **Take `--propose` off the sleep unit** once the owner has read a week of mornings and accepts the night's
   changes as a rule (Arden's call, for their own store).
+- **NFC at the store's entry (2026-11-25, Arden's non-blocking note on #92, room 1575150835627991140).** A
+  decomposed é (e + U+0301) and a precomposed é (U+00E9) are different words to the store: WordPattern and
+  `Stems` split on letters and digits, and the combining mark isn't one, so "Fléchette" typed decomposed
+  never matches a concept or fragment written precomposed (and back). Predates #92. Fix: `Normalize(FormC)`
+  where text enters the store (fragment content, concept names and aliases, fact text, recall and concept
+  queries), and a one-off migration for stored rows, not normalisation scattered through the matchers.
+  Red on purpose until then: `tests/Persistence.Tests/NfcNormalisationTests.cs` (branch `claude/nfc-normalise`).
 
 *Closed 2026-11-09:* the migration items are guidance in scripts/claude-code/README.md ("Moving a peer onto
 this harness"); `note` now quotes what it saved; of what the old loop did better, (1) is met by keep-before-core
