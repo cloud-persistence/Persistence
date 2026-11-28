@@ -282,13 +282,19 @@ internal sealed partial class FragmentStore
                 continue;
             }
 
-            var by = new List<string> { $"session {Short(entry.SessionId)}" };
+            // A served store's audit rows carry no session (the server has none of its own): the snapshot's editor is read instead.
+            var by = new List<string>();
+            if ((entry.SessionId is { Length: > 0 } s ? s : Read(now, nameof(ContextFragmentEntity.TouchedSessionId))) is { Length: > 0 } session)
+            {
+                by.Add($"session {Short(session)}");
+            }
+
             if (Read(now, nameof(ContextFragmentEntity.TouchedModelId)) is { } model)
             {
                 by.Add(model);
             }
 
-            lines.Add($"{entry.CreatedUtc.ToUniversalTime():yyyy-MM-dd HH:mm}Z, replaced ({string.Join(", ", by)}): {oldContent}"
+            lines.Add($"{entry.CreatedUtc.ToUniversalTime():yyyy-MM-dd HH:mm}Z, replaced{(by.Count > 0 ? $" ({string.Join(", ", by)})" : "")}: {oldContent}"
                 + (oldSummary is { Length: > 0 } summary && summary != Read(now, nameof(ContextFragmentEntity.Summary)) ? $"\n  (summary was: {summary})" : ""));
         }
 
