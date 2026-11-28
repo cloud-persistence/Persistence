@@ -208,6 +208,8 @@ internal sealed partial class FragmentStore(
             LastModifiedUtc = DateTimeOffset.UtcNow,
             SessionId = Session,
             TouchedSessionId = Session,
+            ModelId = Model,
+            TouchedModelId = Model,
             Sources = [await PeerSourceAsync()],
             Tags = await TagsAsync(tagPaths),
         };
@@ -269,8 +271,7 @@ internal sealed partial class FragmentStore(
             }
         }
 
-        fragment.LastModifiedUtc = DateTimeOffset.UtcNow;
-        fragment.TouchedSessionId = Session ?? fragment.TouchedSessionId;
+        Touch(fragment);
         await fragments.SaveAsync(fragment);
         if (pass is not null)
         {
@@ -352,6 +353,8 @@ internal sealed partial class FragmentStore(
             LastModifiedUtc = DateTimeOffset.UtcNow,
             SessionId = Session,
             TouchedSessionId = Session,
+            ModelId = Model,
+            TouchedModelId = Model,
             Sources = [await PeerSourceAsync()],
             Tags = (tagPaths.Count > 0 ? await TagsAsync(tagPaths) : old.SelectMany(f => f.Tags))
                 .Concat(pass is null ? [] : await TagsAsync([SleepDistilledTag])).DistinctBy(t => t.Id).ToList(),
@@ -417,6 +420,8 @@ internal sealed partial class FragmentStore(
                 LastModifiedUtc = DateTimeOffset.UtcNow,
                 SessionId = Session,
                 TouchedSessionId = Session,
+                ModelId = Model,
+                TouchedModelId = Model,
                 Sources = [await PeerSourceAsync()],
                 Tags = await TagsAsync(tagPaths),
             };
@@ -435,11 +440,21 @@ internal sealed partial class FragmentStore(
     /// A fragment with where it stands in its line of views: what it replaced (with why), and what
     /// replaced it, so an old view found by search leads to the current one.
     /// </summary>
-    public async Task<string> ShowAsync(long id)
+    public async Task<string> ShowAsync(long id, bool allEarlier = false)
     {
         var fragment = await GetAsync(id);
         var heads = await NoteHeadsAsync([fragment]);
         var text = new StringBuilder(Render(fragment, maxReason: int.MaxValue));
+        // Which model wrote it, and which last changed it: the store outlives the model reading it (Arden's borrow).
+        if (fragment.ModelId is { } wrote)
+        {
+            text.Append($"\n(Written by {wrote}{(fragment.TouchedModelId is { } touched && touched != wrote ? $"; last changed by {touched}" : "")}.)");
+        }
+        else if (fragment.TouchedModelId is { } touched)
+        {
+            text.Append($"\n(Last changed by {touched}; the writer's model was not recorded.)");
+        }
+
         if (fragment.SupersededById is { } by)
         {
             var reason = fragment.Notes is { Length: > 0 } why ? $": {why}" : "";
@@ -459,6 +474,17 @@ internal sealed partial class FragmentStore(
         {
             text.Append("\nClose history (from the audit log, oldest first):");
             foreach (var line in history)
+            {
+                text.Append($"\n- {line}");
+            }
+        }
+
+        if (await EarlierTextsAsync(id) is { Count: > 0 } earlierTexts)
+        {
+            var shown = allEarlier ? earlierTexts : earlierTexts.TakeLast(EarlierTextsShown).ToList();
+            text.Append($"\nEarlier text (from the audit log, oldest first; each was replaced in place by an edit"
+                + (shown.Count < earlierTexts.Count ? $"; the last {shown.Count} of {earlierTexts.Count}, `show {id} --history` reads all" : "") + "):");
+            foreach (var line in shown)
             {
                 text.Append($"\n- {line}");
             }
@@ -502,10 +528,12 @@ internal sealed partial class FragmentStore(
             LastModifiedUtc = DateTimeOffset.UtcNow,
             SessionId = Session,
             TouchedSessionId = Session,
+            ModelId = Model,
+            TouchedModelId = Model,
             Sources = [await PeerSourceAsync()],
         };
         note.Content = text;
-        note.LastModifiedUtc = DateTimeOffset.UtcNow;
+        Touch(note);
         await fragments.SaveAsync(note);
         return note;
     }

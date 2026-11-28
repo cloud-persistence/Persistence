@@ -60,6 +60,7 @@
     <EmbeddedResource Include="Data\Migrations\019_AddSplitFromId.sql" />
     <EmbeddedResource Include="Data\Migrations\020_AddCloseIndexes.sql" />
     <EmbeddedResource Include="Data\Migrations\021_AddModelId.sql" />
+    <EmbeddedResource Include="Data\Migrations\022_AddTouchedModelId.sql" />
   </ItemGroup>
 
   <ItemGroup>

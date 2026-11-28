@@ -109,6 +109,9 @@ public record ContextFragmentEntity : BaseEntity
     /// </summary>
     public string? ModelId { get; set; }
 
+    /// <summary>The model that last added to or edited this fragment, as <c>TouchedSessionId</c> is the session; null when it did not say.</summary>
+    public string? TouchedModelId { get; set; }
+
     public required float Importance { get; set; }
 
     public required float Confidence { get; set; }

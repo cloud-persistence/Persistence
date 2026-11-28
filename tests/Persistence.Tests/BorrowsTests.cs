@@ -40,6 +40,22 @@ public sealed class BorrowsTests : IDisposable
     }
 
     [Fact]
+    public async Task A_note_rewritten_every_block_shows_its_last_few_texts_and_history_reads_all()
+    {
+        var store = await OpenAsync();
+        var f = await store.AddAsync("Personal", "Version 0.", null, 0.5f, null, ["store/hooks"], false);
+        for (var i = 1; i <= FragmentStore.EarlierTextsShown + 2; i++)
+        {
+            await store.EditAsync(f.Id, null, $"Version {i}.", null, null, null, []);
+        }
+
+        var shown = await store.ShowAsync(f.Id);
+        Assert.DoesNotContain("Version 0.", shown);
+        Assert.Contains($"`show {f.Id} --history` reads all", shown);
+        Assert.Contains("Version 0.", await store.ShowAsync(f.Id, allEarlier: true));
+    }
+
+    [Fact]
     public async Task An_edit_that_leaves_the_text_alone_adds_no_earlier_version()
     {
         var store = await OpenAsync();

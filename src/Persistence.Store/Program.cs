@@ -75,7 +75,8 @@ const string Usage = """
                                             notes; reports what links, what is already correct and every skip
                                             with why. Without --apply nothing is written
       forget <id> [--reason <text>]         soft-delete, hidden everywhere; unforget <id> brings it back
-      show <id>
+      show <id> [--history]                 with its line of views, the model that wrote it, and earlier text an edit replaced
+                                            (the last 3; --history all)
       list [--type <type>] [--tag <a/b>] [--archived] [--limit 50] [--after <id>]  --after: newer ids only, oldest first
       search <words...> [--limit 20]        full text, conversation included
       recall <words...> [--text <text|->] [--limit 3] [--exclude <id,id>]... [--snippet 300] [--project <name>]
@@ -566,7 +567,7 @@ static async Task<int> Run(CommandLine line, FragmentStore store)
             }
             else
             {
-                Console.WriteLine(await store.ShowAsync(line.Id()));
+                Console.WriteLine(await store.ShowAsync(line.Id(), line.Has("history")));
             }
 
             break;

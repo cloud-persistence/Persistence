@@ -9,6 +9,25 @@ work lives in [TODO.md](TODO.md); the *why* behind big choices lives in [adr/](a
 remembering, a behaviour or config change). Skip purely mechanical commits (formatting, a typo). Group a
 day's work under a dated heading; a short bold lead-in per change beats a bare bullet.
 
+## 2026-11-27 — two borrows from the agent survey: edits keep their originals visible, and fragments name their model
+- **Why:** Arden's pick from the agent survey (room 1576023465000181972). Supersede and split already archive the old
+  fragment with its reason, but `edit` rewrites in place. The audit log had kept every prior text all along (339
+  content edits in Claude's store, each with its OldData), yet nothing read it back, so for anyone using the store the
+  original was gone. Nothing recorded which model wrote a view either, though Arden and Claude both moved from 4.8 to 5.5.
+- **`show <id>`** now lists the earlier text each edit replaced, oldest first: when, the session, and the editor's
+  model once it is recorded. It shows the last 3 (`EarlierTextsShown`), because a working note is rewritten every
+  block; `show <id> --history` prints all of them. A re-tag or importance change leaves no line. Group heads
+  (`context set`) are edits too, and are covered.
+- **Model id:** migrations 021 `ModelId` (the model that wrote the fragment, set once) and 022 `TouchedModelId` (the
+  last model to edit it, beside `TouchedSessionId`). Both are stamped at write time from `--model`, or from
+  `PERSISTENCE_MODEL` in a session's own shell, and are null when the caller doesn't say: nothing is guessed.
+  `show` prints `(Written by X; last changed by Y.)`. Existing fragments stay null; no backfill here.
+- **Hook:** `pstore` writes (add, edit, supersede, split, note, close, reopen, context) carry `--model`. It comes from
+  `PERSISTENCE_MODEL`, else the newest assistant message in the session's transcript (Claude Code writes that before
+  a tool runs). A store built before the option refuses it; the hook then makes the call again without it, so a
+  hook deployed ahead of its store loses the label, not the write. The local-exe path passes the model in the
+  environment instead. A subagent's call carries its parent's session, so it is stamped with the parent's model.
+
 ## 2026-11-26 — close: marking a recorded state no longer true (PR A of the close build)
 - **Why:** most stale records are a present state ("PR waits on X") still standing after X happened. Supersede needs a
   replacement and archive leaves recall showing it as current. Design: docs/design/close-state.md (Ember approved

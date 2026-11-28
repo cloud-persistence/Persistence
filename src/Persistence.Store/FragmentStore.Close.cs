@@ -172,11 +172,16 @@ internal sealed partial class FragmentStore
             : fragment;
     }
 
-    /// <summary>An edit, so it moves both fields together: <c>TouchedSessionId</c> is the session that last added or edited it.</summary>
+    /// <summary>
+    /// An edit, so it moves the fields together: <c>TouchedSessionId</c> is the session that last added or edited it, and
+    /// <c>TouchedModelId</c> the model. The model is this call's, null when it did not say: kept from the last editor, it
+    /// would put this one's change under another model's name.
+    /// </summary>
     private void Touch(ContextFragmentEntity fragment)
     {
         fragment.LastModifiedUtc = DateTimeOffset.UtcNow;
         fragment.TouchedSessionId = Session ?? fragment.TouchedSessionId;
+        fragment.TouchedModelId = Model;
     }
 
     /// <summary>
@@ -244,10 +249,52 @@ internal sealed partial class FragmentStore
     private static string ClosedLabel(DateTimeOffset closed, string? reason, string? endedBy, int maxReason) =>
         $"closed {closed.ToUniversalTime():yyyy-MM-dd}: {Clip(reason ?? "", maxReason)}{(endedBy is null ? "" : $" (ended by {endedBy})")}";
 
+    /// <summary>How many earlier texts <c>show</c> prints in full before pointing at <c>--history</c>: a working note is rewritten every block.</summary>
+    public const int EarlierTextsShown = 3;
+
+    /// <summary>
+    /// Every text <paramref name="id"/> had before an edit replaced it in place, oldest first, from the audit log's
+    /// before-and-after snapshots, with when, which session and (from migration 022) which model: an edit leaves no
+    /// archived fragment as supersede does, so this is the only place the original can be read back (Arden's borrow,
+    /// room 1576023465000181972). An edit that left the content and summary alone (a re-tag, a new importance) is not one.
+    /// </summary>
     /// <summary>
     /// Every close and reopen of <paramref name="id"/>, oldest first, read from the audit log's snapshots (one line per
     /// change of <c>ClosedUtc</c>): what happened, not what the columns say now.
     /// </summary>
+    private async Task<IReadOnlyList<string>> EarlierTextsAsync(long id)
+    {
+        var lines = new List<string>();
+        foreach (var entry in await audits.GetByTargetAsync(nameof(ContextFragmentEntity), id))
+        {
+            if (entry.OldData is null || entry.NewData is null)
+            {
+                continue;
+            }
+
+            using var was = JsonDocument.Parse(entry.OldData);
+            using var now = JsonDocument.Parse(entry.NewData);
+            string? Read(JsonDocument json, string name) =>
+                json.RootElement.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            var (oldContent, oldSummary) = (Read(was, nameof(ContextFragmentEntity.Content)), Read(was, nameof(ContextFragmentEntity.Summary)));
+            if (oldContent == Read(now, nameof(ContextFragmentEntity.Content)) && oldSummary == Read(now, nameof(ContextFragmentEntity.Summary)))
+            {
+                continue;
+            }
+
+            var by = new List<string> { $"session {Short(entry.SessionId)}" };
+            if (Read(now, nameof(ContextFragmentEntity.TouchedModelId)) is { } model)
+            {
+                by.Add(model);
+            }
+
+            lines.Add($"{entry.CreatedUtc.ToUniversalTime():yyyy-MM-dd HH:mm}Z, replaced ({string.Join(", ", by)}): {oldContent}"
+                + (oldSummary is { Length: > 0 } summary && summary != Read(now, nameof(ContextFragmentEntity.Summary)) ? $"\n  (summary was: {summary})" : ""));
+        }
+
+        return lines;
+    }
+
     private async Task<IReadOnlyList<string>> CloseHistoryAsync(long id)
     {
         var lines = new List<string>();

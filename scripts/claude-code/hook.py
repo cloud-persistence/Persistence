@@ -225,14 +225,50 @@ def open_tunnel(where, wait=8):
     return False
 
 
+# The commands that write a fragment or change one: the store stamps the model that made the call on what they write.
+MODEL_WRITES = ("add", "edit", "supersede", "split", "note", "close", "reopen", "context")
+TRANSCRIPT_TAIL = 512 * 1024  # bytes read from a transcript's end for its model: every assistant line names one
+
+
+def model_of(session):
+    """The model this session runs on ("claude-opus-5-5"), or None: PERSISTENCE_MODEL when the harness or a person sets
+    it, else the newest assistant message in the session's transcript, which Claude Code writes before a tool runs.
+    Nothing is guessed (Arden's borrow from the agent survey, room 1576023465000181972: stamp the model on every
+    fragment). A subagent's call carries its parent's session, so it is stamped with the parent's model."""
+    if named := os.environ.get("PERSISTENCE_MODEL"):
+        return named
+    if not session:
+        return None
+    for path in (Path.home() / ".claude" / "projects").glob(f"*/{session}.jsonl"):
+        try:
+            with open(path, "rb") as f:
+                f.seek(max(0, path.stat().st_size - TRANSCRIPT_TAIL))
+                lines = f.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            if '"assistant"' not in line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue  # the first line of a tail read starts mid-entry
+            model = entry.get("message", {}).get("model") if entry.get("type") == "assistant" else None
+            if model and not model.startswith("<"):  # "<synthetic>": the harness's own message, not a model's
+                return model
+    return None
+
+
 def remote_args(args, cwd=None):
     """A call as the remote server needs it: it has no shell of this session's, so the session, the
-    project an added fragment belongs to, and any file the call names travel with the call."""
+    project an added fragment belongs to, the model making a write, and any file the call names travel with the call."""
     args, stdin = list(args), None
     command = args[0] if args else ""
     session = os.environ.get("PERSISTENCE_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID")
     if "--session" not in args and session:
         args += ["--session", session]
+    if command in MODEL_WRITES and "--model" not in args and (model := model_of(session)):
+        args += ["--model", model]
     if (command == "add" or (command == "context" and args[1:2] in ([], ["list"]))) \
             and "--project" not in args and "--everywhere" not in args \
             and (name := project({"cwd": cwd or os.getcwd()})):
@@ -3347,7 +3383,10 @@ def cli(args):
     exe = os.environ.get("PERSISTENCE_STORE_EXE", "persistence-store")
     where = remote()
     if not where:
-        return subprocess.run([exe, *args]).returncode
+        # In the environment, not as --model: a store built before the option refuses an option it does not know.
+        session = os.environ.get("PERSISTENCE_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        model = model_of(session) if args[:1] and args[0] in MODEL_WRITES else None
+        return subprocess.run([exe, *args], env={**os.environ, "PERSISTENCE_MODEL": model} if model else None).returncode
     try:
         call, stdin = remote_args(args)
     except OSError as e:
@@ -3356,6 +3395,10 @@ def cli(args):
     if stdin is None and "-" in call:
         stdin = sys.stdin.read()
     reply = served_remote(where, call, stdin or "", 300)
+    if reply not in (None, BUSY) and reply[0] == 1 and "--model is not an option" in reply[2] and "--model" not in args:
+        # A store deployed before the stamp: the call is made again without it, rather than failing for want of a label.
+        at = call.index("--model")
+        reply = served_remote(where, call[:at] + call[at + 2:], stdin or "", 300)
     if reply is None or reply is BUSY:
         print(f"the store on {where['host']} did not answer (tunnel log: {STATE / 'tunnel.log'})", file=sys.stderr)
         return 3
