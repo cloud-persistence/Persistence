@@ -213,6 +213,7 @@ try
     store.AmbientProject = () => Projects.Of(Environment.CurrentDirectory);
     store.AmbientSession = Environment.GetEnvironmentVariable("PERSISTENCE_SESSION") is { Length: > 0 } s ? s
         : Environment.GetEnvironmentVariable("CLAUDE_CODE_SESSION_ID") is { Length: > 0 } c ? c : null;
+    store.AmbientModel = Environment.GetEnvironmentVariable("PERSISTENCE_MODEL") is { Length: > 0 } m ? m : null;
     return await Run(line, store);
 }
 catch (UsageException e)
@@ -231,6 +232,7 @@ catch (RefusedException e)
 static async Task<int> Run(CommandLine line, FragmentStore store)
 {
     store.Session = line.Get("session") is { Length: > 0 } named ? named : store.AmbientSession;
+    store.Model = line.Get("model") is { Length: > 0 } model ? model : store.AmbientModel;
     store.Ended = line.GetAll("ended").Select(e => e.Split('|', 2))
         .Select(p => p.Length == 2 && DateTimeOffset.TryParse(p[1], System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.DateTimeStyles.AssumeUniversal, out var at) ? (p[0], at)

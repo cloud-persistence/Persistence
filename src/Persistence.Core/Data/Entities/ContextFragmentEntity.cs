@@ -103,6 +103,12 @@ public record ContextFragmentEntity : BaseEntity
     /// </summary>
     public long? SplitFromId { get; set; }
 
+    /// <summary>
+    /// The model that wrote this fragment ("claude-opus-5-5"), stamped when it is written from the caller's
+    /// <c>--model</c>; null before migration 021 and for a caller that does not say. Set once: an edit keeps it.
+    /// </summary>
+    public string? ModelId { get; set; }
+
     public required float Importance { get; set; }
 
     public required float Confidence { get; set; }
